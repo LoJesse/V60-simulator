@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V60手沖萃取模擬器</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#121b23;color:#e6edf3;font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px}h1{font-size:24px;margin:0}h2{font-size:17px;margin:0 0 10px}p{color:#afc0ce}.controls{display:grid;grid-template-columns:repeat(3,minmax(145px,1fr));gap:14px;margin:22px 0 14px}label{display:block}input,select,button{font:inherit;max-width:100%;padding:7px;background:#22313d;color:#e6edf3;border:1px solid #536675;border-radius:5px}input[type=range]{width:100%}button{cursor:pointer}.actions{display:flex;gap:8px;align-items:center;margin-bottom:14px}.status{color:#ffb4a8}.panels{display:grid;grid-template-columns:1fr 1fr;gap:24px}section{min-width:0}canvas{width:100%;height:auto;background:#182530;border-radius:8px}.legend{font-size:13px;color:#afc0ce}.pool-values{display:flex;gap:16px;flex-wrap:wrap;margin-top:7px;font-variant-numeric:tabular-nums}.fast{color:#ffa766}.mid{color:#58d7d1}.slow{color:#c8a0ed}@media(max-width:760px){.controls,.panels{grid-template-columns:1fr 1fr}main{padding:15px}}@media(max-width:520px){.controls,.panels{grid-template-columns:1fr}}
+</style><main>
+<h1>V60手沖萃取模擬器</h1>
+<div class="controls">
+<label>注水流量（總量 240 g）<select id="pour"><option value="2">2 g/s</option><option value="4" selected>4 g/s</option><option value="6">6 g/s</option></select></label>
+<label>研磨倍率<select id="grind"><option value="0.5">0.5（細）</option><option value="1" selected>1</option><option value="2">2（粗）</option></select></label>
+<label>出口距粉面高度<select id="height"><option value="3">低（3 cm）</option><option value="8" selected>中（8 cm）</option><option value="15">高（15 cm）</option></select></label>
+</div><div class="actions"><button id="run">重新計算</button><button id="play">播放／暫停</button><span id="status" class="status" aria-live="polite"></span></div>
+<label>回放時間 <output id="timeLabel">0 s</output><input id="time" type="range" min="0" max="600" step="1" value="0"></label>
+<div class="panels"><section><h2>粉床剖面</h2>
+<label>顯示 <select id="mode"><option value="speed">水流速率</option><option value="agitation">受擾強度</option><option value="acid">快溶池已萃取比例</option><option value="sweet">中溶池已萃取比例</option><option value="bitter">慢溶池已萃取比例</option></select></label>
+<canvas id="bed" width="550" height="490" role="img" aria-label="粉床場分布與流向箭頭"></canvas><div id="scale" class="legend"></div><div id="cell" class="legend">移到粉床上可讀取局部數值。</div></section>
+<section><h2>已析出物質比例</h2><canvas id="chart" width="550" height="490" role="img" aria-label="快中慢溶池累積析出比例"></canvas><div id="poolValues" class="pool-values legend"></div></section></div>
+</main><script>
+'use strict';
+const PI=Math.PI,RHO=997,MU=.00089,GRAV=9.80665,EPS=.38,DIFF=7e-10,NR=16,NZ=24;
+const JET_DIAMETER=.004,IMPACT_EFFICIENCY=.25,RECIRCULATION=1,FREE_MIX=.05,BLOCK_FACTOR=5,BED_DISPERSIVITY=.05,DISTURBANCE_SPEED=.001,THIN_LAYER_HEIGHT=1e-3;
+const DE=[1.2e-9,4e-10,5e-11],CS=[40,30,15],FR=[.08,.12,.08];
+const sum=a=>a.reduce((s,x)=>s+x,0),perm=d=>.22*d*d*EPS**3/(180*(1-EPS)**2);
+
+const NF=6;
+// Positive q is downward. All fluxes here are relative to the moving free-surface mesh.
+function freeFlux(net,pond,qin,bottom,hp,recirc,mix,loop=null){
+ const n=NR*NF,h=pond/(PI*net.R**2),ring=Array.from({length:NR},(_,x)=>(2*x+1)/(NR*NR));
+ const weights=Array.from({length:n},(_,i)=>ring[i%NR]/NF);
+ const sigma=Math.max(.003,net.o.diameter/2000),a=ring.map((_,x)=>Math.exp(-Math.pow(x*net.dr,2)/(2*sigma*sigma))-Math.exp(-Math.pow((x+1)*net.dr,2)/(2*sigma*sigma))),an=sum(a);
+ const top=a.map(v=>qin*v/an),baseBottom=bottom.map((v,i)=>v-(loop?loop.top[i]:0)),netQ=qin-sum(bottom),links=[],psi=Array.from({length:NF+1},()=>new Float64Array(NR+1)),L=Math.min(h,hp);
+ let peak=0;
+ if(L>1e-12&&recirc>0&&qin>0){
+  for(let y=1;y<NF;y++){const z=h*y/NF,b=sigma+.12*z;if(z>=L)continue;
+   for(let x=1;x<NR;x++){const r=x*net.dr;psi[y][x]=r*r*Math.exp(-r*r/(2*b*b))*(1-r*r/net.R**2)**2*Math.sin(PI*z/L);peak=Math.max(peak,psi[y][x]);}
+  }
+ }
+ const target=recirc*qin*Math.min(1,h/Math.max(hp,1e-12)),factor=peak>0?target/peak:0;
+ for(let y=0;y<=NF;y++)for(let x=0;x<=NR;x++)psi[y][x]=loop?loop.freePsi[y][x]:psi[y][x]*factor;
+ const bmid=sigma+.12*h/2,Urec=loop?sum(loop.top.map(Math.abs))/(4*PI*net.width**2):recirc*qin/(2*PI*bmid*bmid)*Math.min(1,h/Math.max(hp,1e-12)),D=mix*Math.min(bmid,h)*Urec;
+ for(let y=0;y<NF;y++){
+  let cumulative=0;
+  for(let x=0;x<NR;x++){
+   const i=y*NR+x;cumulative+=(top[x]-baseBottom[x]-ring[x]*netQ)/NF;
+   if(x<NR-1){const q=cumulative-(psi[y+1][x+1]-psi[y][x+1]),area=2*PI*(x+1)*net.dr*h/NF;links.push({i,j:i+1,q,d:D*area/net.dr,area,dir:0});}
+   if(y<NF-1){const s=(y+1)/NF,q=top[x]*(1-s)+baseBottom[x]*s+(psi[y+1][x+1]-psi[y+1][x]),area=ring[x]*PI*net.R**2;links.push({i,j:i+NR,q,d:D*area/(h/NF),area,dir:1});}
+  }
+ }
+ const balance=new Float64Array(n);links.forEach(e=>{balance[e.i]-=e.q;balance[e.j]+=e.q;});for(let x=0;x<NR;x++){balance[x]+=top[x];balance[(NF-1)*NR+x]-=bottom[x];}
+ const residual=Math.max(...balance.map((v,i)=>Math.abs(v-weights[i]*netQ)));
+ return {links,top,bottom,weights,netQ,residual,h,D,psi,target,hp,source:null};
+}
+
+
+function network(o){
+ const H=Math.cbrt(3*(o.dose/.39)*1e-6/(PI/3)),R=H/Math.sqrt(3),dr=R/NR,dz=H/NZ,dp=650e-6*o.grind,K=perm(dp),kc=K*RHO*GRAV/MU;
+ const cells=[],map=Array.from({length:NZ},()=>Array(NR).fill(-1));
+ for(let y=0;y<NZ;y++)for(let x=0;x<NR;x++)if((x+.5)*dr<(H-(y+.5)*dz)/Math.sqrt(3)){
+  map[y][x]=cells.length;cells.push({x,y,r:(x+.5)*dr,z:H-(y+.5)*dz,area:PI*((x+1)**2-x*x)*dr*dr,vol:PI*((x+1)**2-x*x)*dr*dr*dz});
+ }
+ const volume=sum(cells.map(c=>c.vol)),n=cells.length,edges=[],bounds=[];
+ const boundary=(i,A,len,top)=>bounds.push({i,A,len,top,z:top?H:Math.max(0,cells[i].z-(len===dz/2?dz/2:0))});
+ cells.forEach((c,i)=>{
+  if(c.y===0)boundary(i,c.area,dz/2,true);
+  if(c.x+1<NR&&map[c.y][c.x+1]>=0)edges.push({i,j:map[c.y][c.x+1],A:2*PI*(c.x+1)*dr*dz,len:dr,dir:0});
+  else boundary(i,2*PI*(c.x+1)*dr*dz,dr/2,false);
+  if(c.y+1<NZ&&map[c.y+1][c.x]>=0)edges.push({i,j:map[c.y+1][c.x],A:c.area,len:dz,dir:1});
+  else boundary(i,c.area,dz/2,false);
+ });
+ const tops=bounds.filter(b=>b.top),q=o.pour/1000/RHO,u0=4*q/(PI*JET_DIAMETER**2),Bstate=new Float64Array(n),sigma=.003,impactBed=Math.sqrt(u0*u0+2*GRAV*o.height/100),qref=.002/RHO,uref=Math.sqrt((4*qref/(PI*JET_DIAMETER**2))**2+2*GRAV*.08);
+ // Mild empirical redistribution: lower permeability from finer grinds makes the plume shallower and wider.
+ const depthGrind=Math.max(.88,Math.min(1.12,o.grind**.15)),widthGrind=Math.max(.88,Math.min(1.12,o.grind**-.12));
+ const baseDepth=Math.min(H,.015*Math.sqrt(q*impactBed/(qref*uref))),depth=Math.min(H,baseDepth*depthGrind),impactWidth=Math.max(.003,2.5*Math.sqrt(q/(PI*impactBed))),width=Math.min(.95*R,(impactWidth+.5*baseDepth)*widthGrind);
+ let warm=new Float64Array(n),lastIterations=0;
+ function advance(I,dt){for(let i=0;i<n;i++){const rate=I[i]/15+1/120,target=(I[i]/15)/rate;Bstate[i]=target+(Bstate[i]-target)*Math.exp(-rate*dt);}}
+ function solve(ts,tb,b){
+  const diag=new Float64Array(n);
+  edges.forEach((e,k)=>{diag[e.i]+=ts[k];diag[e.j]+=ts[k];});bounds.forEach((e,k)=>diag[e.i]+=tb[k]);
+  const mul=(x,out)=>{for(let i=0;i<n;i++)out[i]=diag[i]*x[i];edges.forEach((e,k)=>{out[e.i]-=ts[k]*x[e.j];out[e.j]-=ts[k]*x[e.i];});};
+  const x=warm.slice(),r=new Float64Array(n),z=new Float64Array(n),p=new Float64Array(n),ap=new Float64Array(n);mul(x,ap);
+  let rz=0,bmax=0;for(let i=0;i<n;i++){r[i]=b[i]-ap[i];z[i]=r[i]/diag[i];p[i]=z[i];rz+=r[i]*z[i];bmax=Math.max(bmax,Math.abs(b[i]));}
+  const tol=Math.max(1e-20,bmax*1e-12);
+  for(let k=0;k<500;k++){
+   let norm=0;for(let i=0;i<n;i++)norm=Math.max(norm,Math.abs(r[i]));if(norm<tol){warm=x;lastIterations=k;return x;}
+   mul(p,ap);let pap=0;for(let i=0;i<n;i++)pap+=p[i]*ap[i];if(!(pap>0))throw Error('壓力矩陣非正定');
+   const alpha=rz/pap;let next=0;for(let i=0;i<n;i++){x[i]+=alpha*p[i];r[i]-=alpha*ap[i];z[i]=r[i]/diag[i];next+=r[i]*z[i];}
+   const beta=next/rz;for(let i=0;i<n;i++)p[i]=z[i]+beta*p[i];rz=next;
+  }
+  throw Error('壓力求解未收斂');
+ }
+ function cellVelocity(edgeFlux,topFlux){
+  const ur=new Float64Array(n),uz=new Float64Array(n),ar=new Float64Array(n),az=new Float64Array(n);
+  edges.forEach((e,k)=>{const v=edgeFlux[k]/e.A;if(e.dir===0){ur[e.i]+=v;ur[e.j]+=v;ar[e.i]++;ar[e.j]++;}else{uz[e.i]+=v;uz[e.j]+=v;az[e.i]++;az[e.j]++;}});
+  bounds.forEach(b=>{if(b.top){const v=topFlux[cells[b.i].x]/b.A;uz[b.i]+=v;az[b.i]++;}});
+  return cells.map((_,i)=>{const r=ur[i]/Math.max(1,ar[i]),z=uz[i]/Math.max(1,az[i]);return {ur:r,uz:z,speed:Math.hypot(r,z)};});
+ }
+ function loopField(h,on,impact,ts,tb,availablePower){
+  const empty=()=>Array.from({length:NF+1},()=>new Float64Array(NR+1)),freePsi=empty(),bedPsi=Array.from({length:NZ+1},()=>new Float64Array(NR+1));
+  const bedShape=(r,d)=>{const F=1-r*r/(width*width)-d*d/(depth*depth);return F>0&&r>0?r*r*F*F:0;};
+  let peak=0;
+  for(let y=0;y<=NZ;y++)for(let x=1;x<NR;x++){
+   const valid=y===0?map[0][x-1]>=0&&map[0][x]>=0:y<NZ&&map[y-1][x-1]>=0&&map[y-1][x]>=0&&map[y][x-1]>=0&&map[y][x]>=0;
+   if(valid){bedPsi[y][x]=bedShape(x*dr,y*dz);peak=Math.max(peak,bedPsi[y][x]);}
+  }
+  for(let y=0;y<=NF;y++)for(let x=1;x<NR;x++){
+   if(y===NF)freePsi[y][x]=bedPsi[0][x];
+   else if(h>1e-12){const s=y/NF,smooth=s*s*(3-2*s);freePsi[y][x]=bedPsi[0][x]*smooth;}
+   peak=Math.max(peak,freePsi[y][x]);
+  }
+  let gain=on&&o.height/100>h&&peak>0?RECIRCULATION*q*Math.sqrt(impact/uref)*Math.exp(-h/(2*depth))/peak:0;
+  const raw=edges.map(e=>{const c=cells[e.i];return e.dir===1?bedPsi[c.y+1][c.x+1]-bedPsi[c.y+1][c.x]:-(bedPsi[c.y+1][c.x+1]-bedPsi[c.y][c.x+1]);});
+  const top=Array.from({length:NR},(_,x)=>bedPsi[0][x+1]-bedPsi[0][x]);
+  let dissip=0;raw.forEach((v,k)=>dissip+=v*v*RHO*GRAV/ts[k]);bounds.forEach((b,k)=>{if(b.top)dissip+=top[cells[b.i].x]**2*RHO*GRAV/tb[k];});
+  if(dissip>0)gain=Math.min(gain,Math.sqrt(Math.max(0,availablePower)/dissip));
+  for(const row of freePsi)for(let x=0;x<=NR;x++)row[x]*=gain;
+  const ef=raw.map(v=>v*gain),surface=top.map(v=>v*gain),velocity=cellVelocity(ef,surface);
+  return {ef,top:surface,freePsi,velocity,power:dissip*gain*gain,availablePower};
+ }
+ function field(h,on=true){
+  const fall=o.height/100-h,impact=Math.sqrt(u0*u0+2*GRAV*Math.max(0,fall)),plume={hp:depth,source:'鐘形循環的粉床深度'};
+  if(fall<=0)plume.source='出口浸沒：水柱模型不適用，衝擊與回流關閉';
+  const kRatio=Array.from(Bstate,b=>1/(1+BLOCK_FACTOR*b)),ts=edges.map(e=>kc*2*kRatio[e.i]*kRatio[e.j]/(kRatio[e.i]+kRatio[e.j])*e.A/e.len),tb=bounds.map(b=>kc*b.A/(b.len/kRatio[b.i]+(b.top?0:.01*K/perm(650e-6))));
+  const w=sigma+.12*h;let norm=0;
+  const shapes=tops.map(b=>{const c=cells[b.i],v=2*PI*w*w*(Math.exp(-Math.pow(c.x*dr,2)/(2*w*w))-Math.exp(-Math.pow((c.x+1)*dr,2)/(2*w*w)))/b.A;norm+=v*b.A;return v;});
+  const jet=on&&fall>0?IMPACT_EFFICIENCY*q*impact*Math.exp(-h/(2*depth))/(GRAV*norm):0;
+  let ti=0;const bh=bounds.map(b=>b.top?H+h+jet*shapes[ti++]:b.z);
+  let head,darcy,bf;
+  for(let pass=0;pass<=bounds.length;pass++){
+   const rhs=new Float64Array(n);bounds.forEach((b,k)=>rhs[b.i]+=tb[k]*bh[k]);
+   head=solve(ts,tb,rhs);darcy=edges.map((e,k)=>ts[k]*(head[e.i]-head[e.j]));bf=bounds.map((b,k)=>tb[k]*(bh[k]-head[b.i]));
+   let changed=false;bounds.forEach((b,k)=>{if(!b.top&&tb[k]>0&&bf[k]>1e-14){tb[k]=0;changed=true;}});
+   if(!changed)break;
+   if(pass===bounds.length)throw Error('單向濾紙邊界未收斂');
+  }
+  let work=0;bounds.forEach((b,k)=>{if(b.top)work+=Math.max(0,(bh[k]-H-h)*RHO*GRAV*bf[k]);});
+  const loop=loopField(h,on,impact,ts,tb,on&&fall>0?Math.max(0,IMPACT_EFFICIENCY*.5*RHO*q*impact*impact-work):0);
+  const ef=darcy.map((v,i)=>v+loop.ef[i]);bounds.forEach((b,k)=>{if(b.top)bf[k]+=loop.top[cells[b.i].x];});
+  const bal=new Float64Array(n);edges.forEach((e,k)=>{bal[e.i]-=ef[k];bal[e.j]+=ef[k];});bounds.forEach((b,k)=>bal[b.i]+=bf[k]);
+  let input=0,central=0;bounds.forEach((b,k)=>{if(b.top){input+=bf[k];if(cells[b.i].r<=.008)central+=bf[k];}});
+  const loopSpeed=loop.velocity.map(v=>v.speed),I=loopSpeed.map(v=>1-Math.exp(-((v/DISTURBANCE_SPEED)**2))),bedD=loopSpeed.map(v=>EPS*(DIFF+BED_DISPERSIVITY*dp*v));
+  return {head,ef,bf,input,central,residual:Math.max(...bal.map(Math.abs)),jet,plume,u0,impact,loop,loopSpeed,kRatio,I,bedD,iterations:lastIterations};
+ }
+ return {o,H,R,dr,dz,dp,K,cells,edges,bounds,volume,field,advance,depth,width,pondV:h=>PI*R*R*h,pondH:v=>v/(PI*R*R)};
+}
+
+function simulate(net,end=180,outerDt=.1){
+ const {cells,edges,bounds,dp}=net,n=cells.length,nf=NR*NF,mc=cells.map(c=>net.o.dose/1000*c.vol/net.volume),wv=cells.map(c=>EPS*c.vol),fw=Array.from({length:nf},(_,i)=>(2*(i%NR)+1)/(NR*NR*NF));
+ const initial=mc.map(m=>FR.map(f=>m*f)),solid=initial.map(a=>a.slice()),mass=Array.from({length:n+nf},()=>[0,0,0]);
+ let pond=0,cup=0,cupM=[0,0,0],input=0,time=0,maxResidual=0,maxFreeResidual=0,maxWaterError=0,maxSoluteError=0,minMass=0,maxInterfaceError=0,maxLoopPowerRatio=0,roundoffAdded=0;
+ let current=null,lastFree=null,stepsTotal=0;const history=[],rates=[0,0,0],thin=net.pondV(THIN_LAYER_HEIGHT);
+ function save(){
+  const dissolved=FR.map((_,j)=>sum(initial.map((a,i)=>a[j]-solid[i][j]))),we=input-cup-pond,se=sum(dissolved)-sum(cupM)-sum(mass.map(sum));
+  maxWaterError=Math.max(maxWaterError,Math.abs(we));maxSoluteError=Math.max(maxSoluteError,Math.abs(se));
+  history.push({t:time,h:net.pondH(pond),ey:100*sum(dissolved)/(net.o.dose/1000),poolExtracted:dissolved.map((m,j)=>100*m/(net.o.dose/1000*FR[j])),rates:rates.map(x=>x*1000),cup:cup*RHO*1000,tds:cup>0?100*sum(cupM)/(cup*RHO+sum(cupM)):0,waterError:we*RHO*1000,soluteError:se*1000,share:current&&current.input>0?current.central/current.input:0,duty:current?current.duty:0,q:current?current.input*current.duty*RHO*1000:0,hp:current?current.plume.hp:0,hRate:current?(current.qin-current.input*current.duty)/(PI*net.R**2)*1000:0,returnFlow:current?sum(bounds.map((b,k)=>b.top?Math.max(0,-current.bf[k]):0))*RHO*1000:0,source:current?current.plume.source:'尚未注水',freeFlux:lastFree,
+   freeData:fw.map((w,i)=>pond>1e-20?100*sum(mass[n+i])/(pond*w*RHO+sum(mass[n+i])):0),
+   data:cells.map((c,i)=>({kRatio:current?current.kRatio[i]:1,agitation:current?current.I[i]:0,speed:current?current.speed[i]:0,ur:current?current.ur[i]:0,uz:current?current.uz[i]:0,pressure:current?(current.head[i]-c.z)*RHO*GRAV:0,liquid:100*sum(mass[i])/(wv[i]*RHO+sum(mass[i])),pools:solid[i].map((m,j)=>1-m/initial[i][j])}))});rates.fill(0);
+ }
+ save();let nextSave=.5;
+ while(time<end-1e-9){
+  let dt=Math.min(outerDt,end-time,nextSave-time),qin=Math.min(net.o.pour/1000/RHO,Math.max(0,240/1000/RHO-input)/dt);
+  let f=net.field(net.pondH(pond),qin>0),full=pond>thin*1.01&&pond+(qin-f.input)*dt>thin;
+  let duty=1;
+  if(!full){
+   pond+=qin*dt;input+=qin*dt;
+   f=net.field(net.pondH(pond),qin>0);duty=f.input>0?Math.min(1,pond/(f.input*dt)):0;
+   const combined=[0,1,2].map(j=>sum(mass.slice(n).map(a=>a[j])));fw.forEach((w,i)=>{mass[n+i]=combined.map(m=>m*w);});
+  }
+  f.duty=duty;f.qin=qin;maxLoopPowerRatio=Math.max(maxLoopPowerRatio,f.loop.availablePower>0?f.loop.power/f.loop.availablePower:0);f.ef=f.ef.map(q=>q*duty);f.bf=f.bf.map(q=>q*duty);f.loopSpeed=f.loopSpeed.map(v=>v*duty);f.I=f.loopSpeed.map(v=>1-Math.exp(-((v/DISTURBANCE_SPEED)**2)));f.bedD=f.loopSpeed.map(v=>EPS*(DIFF+BED_DISPERSIVITY*dp*v));net.advance(f.I,dt);maxResidual=Math.max(maxResidual,f.residual*duty);
+  const ur=new Float64Array(n),uz=new Float64Array(n),ar=new Float64Array(n),az=new Float64Array(n);
+  edges.forEach((e,k)=>{const v=f.ef[k]/e.A;if(e.dir===0){ur[e.i]+=v;ur[e.j]+=v;ar[e.i]++;ar[e.j]++;}else{uz[e.i]+=v;uz[e.j]+=v;az[e.i]++;az[e.j]++;}});
+  bounds.forEach((b,k)=>{const q=f.bf[k];if(b.top){uz[b.i]+=q/b.A;az[b.i]++;}else if(b.z<cells[b.i].z){uz[b.i]-=q/b.A;az[b.i]++;}else{ur[b.i]-=q/b.A;ar[b.i]++;}});
+  f.ur=ur.map((v,i)=>v/Math.max(1,ar[i]));f.uz=uz.map((v,i)=>v/Math.max(1,az[i]));f.speed=f.ur.map((v,i)=>Math.hypot(v,f.uz[i]));current=f;
+  const links=edges.map((e,k)=>({i:e.i,j:e.j,q:f.ef[k],d:2*f.bedD[e.i]*f.bedD[e.j]/(f.bedD[e.i]+f.bedD[e.j])*e.A/e.len})),bottom=new Float64Array(NR),outlets=[];
+  bounds.forEach((b,k)=>{const q=f.bf[k];if(b.top){bottom[cells[b.i].x]+=q;if(full)links.push({i:n+(NF-1)*NR+cells[b.i].x,j:b.i,q,d:0,interface:true,area:b.A});}else{if(q>1e-14)throw Error('濾紙出口發生外界倒灌，超出本版邊界假設');outlets.push({i:b.i,q:Math.max(0,-q)});}});
+  let ff=null;
+  if(full){
+   ff=freeFlux(net,pond,qin,bottom,f.plume.hp,net.o.height/100>net.pondH(pond)?RECIRCULATION:0,FREE_MIX,f.loop);
+   links.forEach(e=>{if(e.interface)e.d=e.area/(net.dz/2/f.bedD[e.j]+ff.h/(2*NF)/(DIFF+ff.D));});
+   ff.links.forEach(e=>links.push({i:n+e.i,j:n+e.j,q:e.q,d:e.d}));
+   maxFreeResidual=Math.max(maxFreeResidual,ff.residual);
+   maxInterfaceError=Math.max(maxInterfaceError,Math.abs(sum(bottom)-f.input*duty));
+  }
+  lastFree=ff?{psi:ff.psi.map(a=>Array.from(a)),top:ff.top,bottom:Array.from(bottom),target:ff.target,D:ff.D,h:ff.h,hp:ff.hp}:null;
+  const loss=new Float64Array(n+nf);links.forEach(e=>{loss[e.q>=0?e.i:e.j]+=Math.abs(e.q);loss[e.i]+=e.d;loss[e.j]+=e.d;});outlets.forEach(b=>loss[b.i]+=b.q);
+  if(!full)bounds.forEach((b,k)=>{if(b.top&&f.bf[k]<0)loss[b.i]-=f.bf[k];});
+  const pondEnd=full?pond+(qin-sum(bottom))*dt:Math.max(0,pond-sum(bottom)*dt),minP=full?Math.min(pond,pondEnd):pond;
+  let limit=dt;loss.forEach((q,i)=>{if(q>0)limit=Math.min(limit,.25*(i<n?wv[i]:minP*fw[i-n])/q);});
+  if(!full){const pout=sum(Array.from(bottom).map(q=>Math.max(0,q)));if(pout>0&&pond>0)limit=Math.min(limit,.25*pond/pout);}
+  const steps=Math.max(1,Math.ceil(dt/Math.max(limit,1e-8))),ds=dt/steps;stepsTotal+=steps;
+  for(let step=0;step<steps;step++){
+   const dv=mass.map(()=>[0,0,0]),vol=wv.concat(fw.map(w=>Math.max(pond*w,1e-30)));
+   const transfers=links.map(e=>({i:e.i,j:e.j,dm:[0,1,2].map(j=>{const ci=mass[e.i][j]/vol[e.i],cj=mass[e.j][j]/vol[e.j];return (e.q*(e.q>=0?ci:cj)+e.d*(ci-cj))*ds;})}));
+   const sinks=outlets.map(b=>({i:b.i,dm:[0,1,2].map(j=>b.q*ds*mass[b.i][j]/wv[b.i])})),outgoing=mass.map(()=>[0,0,0]);
+   transfers.forEach(t=>t.dm.forEach((dm,j)=>outgoing[dm>=0?t.i:t.j][j]+=Math.abs(dm)));sinks.forEach(t=>t.dm.forEach((dm,j)=>outgoing[t.i][j]+=dm));
+   const limiter=mass.map((a,i)=>a.map((m,j)=>outgoing[i][j]>0?Math.min(1,m/outgoing[i][j]):1));
+   transfers.forEach(t=>t.dm.forEach((dm,j)=>{const donor=dm>=0?t.i:t.j,limited=dm*limiter[donor][j];dv[t.i][j]-=limited;dv[t.j][j]+=limited;}));
+   sinks.forEach(t=>t.dm.forEach((dm,j)=>{const limited=dm*limiter[t.i][j];dv[t.i][j]-=limited;cupM[j]+=limited;}));outlets.forEach(b=>cup+=b.q*ds);
+   if(full){pond+=(qin-sum(bottom))*ds;input+=qin*ds;}
+   else{
+    const pm=[0,1,2].map(j=>sum(mass.slice(n).map(a=>a[j]))),change=[0,0,0],requests=[];
+    bounds.forEach((b,k)=>{if(!b.top)return;const q=f.bf[k];requests.push({i:b.i,q,dm:[0,1,2].map(j=>q*ds*(q>=0?(pond>1e-20?pm[j]/pond:0):mass[b.i][j]/wv[b.i]))});});
+    const pondOut=[0,1,2].map(j=>sum(requests.map(t=>Math.max(0,t.dm[j])))),pondLimit=pondOut.map((v,j)=>v>0?Math.min(1,pm[j]/v):1);
+    requests.forEach(t=>t.dm.forEach((dm,j)=>{let limited;if(dm>=0)limited=dm*pondLimit[j];else limited=-Math.min(-dm,Math.max(0,mass[t.i][j]+dv[t.i][j]));dv[t.i][j]+=limited;change[j]-=limited;}));
+    fw.forEach((w,i)=>{for(let j=0;j<3;j++)dv[n+i][j]+=change[j]*w;});pond-=sum(bottom)*ds;
+   }
+   mass.forEach((a,i)=>{for(let j=0;j<3;j++){a[j]+=dv[i][j];minMass=Math.min(minMass,a[j]);if(a[j]<-1e-18)throw Error('溶質輸送產生負質量');if(a[j]<0){roundoffAdded-=a[j];a[j]=0;}}});
+   cells.forEach((c,i)=>{
+    const A=2.5*6*mc[i]/(1100*dp),Re=RHO*f.speed[i]/EPS*dp/MU,Sc=MU/(RHO*DIFF),km=(2+1.1*Re**.6*Sc**(1/3))*DIFF/dp;
+    for(let j=0;j<3;j++){const G=1/(dp/6/(DE[j]*A)+1/(km*A)),a=CS[j]/initial[i][j],drive=a*solid[i][j]-mass[i][j]/wv[i],dm=drive>0?Math.min(solid[i][j],drive/(a+1/wv[i])*(-Math.expm1(-G*(a+1/wv[i])*ds))):0;solid[i][j]-=dm;mass[i][j]+=dm;rates[j]+=dm/.5;minMass=Math.min(minMass,solid[i][j]);}
+   });
+  }
+  if(pond<0&&pond>-1e-16)pond=0;
+  time+=dt;if(time>=nextSave-1e-9){save();nextSave+=.5;}
+ }
+ return {history,maxResidual,maxFreeResidual,maxInterfaceError,maxWaterError:maxWaterError*RHO*1000,maxSoluteError:maxSoluteError*1000,minMass,stepsTotal,maxLoopPowerRatio,roundoffAdded};
+}
+let model,result,playing=false,timer;
+const $=id=>document.getElementById(id);
+function options(){const o={dose:20};for(const id of ['pour','grind','height']){const el=$(id);if(!Number.isFinite(+el.value))throw Error('請選擇 '+id);o[id]=+el.value;}return {...o,diameter:4,eta:IMPACT_EFFICIENCY,recirc:RECIRCULATION,mix:FREE_MIX,block:BLOCK_FACTOR,bedmix:BED_DISPERSIVITY};}
+function plot(){
+ const cv=$('chart'),c=cv.getContext('2d'),a=result.history,idx=+$('time').value,s=a[idx],W=cv.width,H=cv.height,L=52,R=18,T=28,B=42,pw=W-L-R,ph=H-T-B,maxT=a[a.length-1].t,colors=['#ffa766','#58d7d1','#c8a0ed'];
+ c.clearRect(0,0,W,H);c.font='13px system-ui';c.fillStyle='#bbccd8';c.fillText('析出比例 (%)',8,18);
+ for(let k=0;k<=4;k++){const y=T+ph*(1-k/4);c.fillText(String(k*25),18,y+4);c.strokeStyle='#344754';c.beginPath();c.moveTo(L,y);c.lineTo(W-R,y);c.stroke();}
+ for(let k=0;k<=5;k++){const x=L+pw*k/5;c.fillText(String(Math.round(maxT*k/5)),x-8,H-13);}c.fillText('s',W-12,H-13);
+ const draw=(j,end,alpha,width)=>{c.globalAlpha=alpha;c.strokeStyle=colors[j];c.lineWidth=width;c.beginPath();for(let k=0;k<=end;k++){const x=L+a[k].t/maxT*pw,y=T+(1-Math.max(0,Math.min(100,a[k].poolExtracted[j]))/100)*ph;k?c.lineTo(x,y):c.moveTo(x,y);}c.stroke();};
+ colors.forEach((_,j)=>{draw(j,idx,1,3);const x=L+s.t/maxT*pw,y=T+(1-s.poolExtracted[j]/100)*ph;c.fillStyle=colors[j];c.beginPath();c.arc(x,y,4,0,2*PI);c.fill();});c.globalAlpha=1;c.lineWidth=1;
+ const eventLine=(t,color,dash)=>{if(s.t<t)return;const x=L+t/maxT*pw;c.strokeStyle=color;c.lineWidth=2;c.setLineDash(dash);c.beginPath();c.moveTo(x,T);c.lineTo(x,T+ph);c.stroke();c.setLineDash([]);};
+ eventLine(result.pourEnd,'#7dd3fc',[8,4]);eventLine(result.dripEnd,'#f2d184',[2,4]);
+ const x=L+s.t/maxT*pw;c.strokeStyle='#e6edf3';c.setLineDash([4,4]);c.beginPath();c.moveTo(x,T);c.lineTo(x,T+ph);c.stroke();c.setLineDash([]);
+ $('poolValues').innerHTML=`<span class="fast">快溶池 ${s.poolExtracted[0].toFixed(1)}%</span><span class="mid">中溶池 ${s.poolExtracted[1].toFixed(1)}%</span><span class="slow">慢溶池 ${s.poolExtracted[2].toFixed(1)}%</span>${s.t>=result.pourEnd?`<span style="color:#7dd3fc">│ 注水結束 ${result.pourEnd.toFixed(1)} s</span>`:''}${s.t>=result.dripEnd?`<span style="color:#f2d184">│ 滴濾結束 ${result.dripEnd.toFixed(1)} s</span>`:''}`;
+}
+function render(){if(!result)return;const s=result.history[+$('time').value],cv=$('bed'),c=cv.getContext('2d'),mode=$('mode').value,W=cv.width,H=cv.height,scale=Math.min((W-70)/(2*model.R),(H-70)/model.H),cx=W/2,y0=25;
+ const val=d=>mode==='agitation'?d.agitation:mode==='speed'?d.speed*1000:d.pools[['acid','sweet','bitter'].indexOf(mode)]*100;
+ const max=mode==='agitation'?1:mode==='speed'?result.speedMax:100;
+ c.clearRect(0,0,W,H);model.cells.forEach((cell,i)=>{const d=s.data[i],v=Math.max(0,Math.min(1,val(d)/max));c.fillStyle=`hsl(${220-210*v} 65% ${30+25*v}%)`;for(const sign of [-1,1]){const x=cx+(sign>0?cell.x:-(cell.x+1))*model.dr*scale,y=y0+cell.y*model.dz*scale;c.fillRect(x,y,model.dr*scale+.2,model.dz*scale+.2);if(cell.x%3===0&&cell.y%3===0&&d.speed>1e-12){const xx=x+model.dr*scale/2,yy=y+model.dz*scale/2,dx=sign*d.ur/d.speed*9,dy=d.uz/d.speed*9;c.strokeStyle='#fff';c.beginPath();c.moveTo(xx,yy);c.lineTo(xx+dx,yy+dy);c.lineTo(xx+dx-.4*dx+.3*dy,yy+dy-.4*dy-.3*dx);c.moveTo(xx+dx,yy+dy);c.lineTo(xx+dx-.4*dx-.3*dy,yy+dy-.4*dy+.3*dx);c.stroke();}}});
+ c.fillStyle='#bbccd8';c.font='13px system-ui';c.fillText(`寬 ${(2*model.R*1000).toFixed(1)} mm · 高 ${(model.H*1000).toFixed(1)} mm`,25,H-15);
+ $('timeLabel').textContent=s.t.toFixed(1)+' s';$('scale').textContent=`色階：藍 0 → 紅 ${max.toFixed(2)} ${mode==='speed'?'mm/s':mode==='agitation'?'（無因次）':'%'}；白箭頭為實際水流方向。`;
+ cv.onmousemove=e=>{const box=cv.getBoundingClientRect(),x=(e.clientX-box.left)*W/box.width,y=(e.clientY-box.top)*H/box.height,ix=Math.floor(Math.abs(x-cx)/(model.dr*scale)),iy=Math.floor((y-y0)/(model.dz*scale)),i=model.cells.findIndex(v=>v.x===ix&&v.y===iy);if(i>=0){const d=s.data[i];$('cell').textContent=`r ${(model.cells[i].r*1000).toFixed(1)} mm：水流 ${(d.speed*1000).toFixed(3)} mm/s、受擾 ${d.agitation.toFixed(3)}、快／中／慢溶池 ${(d.pools[0]*100).toFixed(1)}%／${(d.pools[1]*100).toFixed(1)}%／${(d.pools[2]*100).toFixed(1)}%`;}};
+ plot();
+}
+function run(){playing=false;$('status').textContent='計算中…';setTimeout(()=>{try{model=network(options());result=simulate(model);result.speedMax=Math.max(.01,...result.history.map(s=>Math.max(...s.data.map(d=>d.speed*1000))));result.pourEnd=240/model.o.pour;const drip=result.history.find(s=>s.t>=result.pourEnd&&s.h*1000<.01&&s.q<.01);result.dripEnd=drip?drip.t:result.history.at(-1).t;$('time').max=result.history.length-1;$('time').value=Math.min(60,result.history.length-1);$('status').textContent='';render();}catch(e){$('status').textContent='計算失敗：'+e.message;}},20);}
+
+function drawFree(){
+ const s=result.history[+$('time').value],c=$('free').getContext('2d'),W=1000,H=300,left=45,top=25,pw=910,ph=210;
+ c.clearRect(0,0,W,H);c.font='14px system-ui';c.fillStyle='#bcd0de';
+ if(s.h<THIN_LAYER_HEIGHT||!s.freeFlux){c.fillText('目前為供水受限薄膜支路，未解析自由水層。',40,100);$('freeLabel').textContent='粉床中的循環仍可在預浸潤液體內運作；本圖只顯示可解析水層。';return;}
+ for(let y=0;y<NF;y++)for(let x=0;x<NR;x++)for(const sign of [-1,1]){
+  const px=left+pw/2+(sign>0?x:-(x+1))*pw/(2*NR),py=top+y*ph/NF;
+  c.fillStyle=`hsl(${220-210*Math.min(1,s.freeData[y*NR+x]/3)} 65% 45%)`;c.fillRect(px,py,pw/(2*NR)+.2,ph/NF+.2);
+  const p=s.freeFlux.psi,down=(p[y][x+1]-p[y][x]+p[y+1][x+1]-p[y+1][x])/2/(PI*((x+1)**2-x*x)*model.dr**2);
+  const radial=-(p[y+1][x+1]-p[y][x+1]+p[y+1][x]-p[y][x])/2/(2*PI*(x+.5)*model.dr*s.freeFlux.h/NF);
+  // Draw the direction after converting physical velocities to the exaggerated plot scale.
+  const dx=sign*radial*pw/(2*model.R),dy=down*ph/s.freeFlux.h,norm=Math.hypot(dx,dy);
+  if(x%2===0&&norm>1e-12){const xx=px+pw/(4*NR),yy=py+ph/(2*NF),a=dx/norm*12,b=dy/norm*12;c.strokeStyle='#fff';c.beginPath();c.moveTo(xx,yy);c.lineTo(xx+a,yy+b);c.lineTo(xx+a-.4*a+.3*b,yy+b-.4*b-.3*a);c.moveTo(xx+a,yy+b);c.lineTo(xx+a-.4*a-.3*b,yy+b-.4*b+.3*a);c.stroke();}
+ }
+ c.fillStyle='#bcd0de';c.fillText('中央注水 ↓（循環跨越粉床界面；淨入床量不等於中央向下總量）',45,18);
+ c.fillText(`粉床界面：自由水流出 = 粉床流入；水深 ${(s.h*1000).toFixed(2)} mm，垂直比例放大`,45,265);
+ $('freeLabel').textContent=`顏色：液相 0–3%。鐘形循環跨入粉床 ${(model.depth*1000).toFixed(1)} mm，粉面最大半寬 ${(model.width*1000).toFixed(1)} mm；白箭頭僅顯示循環分量。Dmix=${s.freeFlux.D.toExponential(2)} m²/s。`;
+}
+
+function drawHydro(){
+ if(!result)return;const c=$('hydro').getContext('2d'),W=1000,H=300;c.clearRect(0,0,W,H);c.font='14px system-ui';
+ const a=result.history,mh=Math.max(1,...a.map(s=>s.h*1000)),mq=Math.max(model.o.pour,...a.map(s=>s.q)),xs=t=>55+t/300*900;
+ for(const [key,color,max,y0,label] of [['h','#58d7d1',mh,125,'h (mm)'],['q','#ffa766',mq,260,'Q (g/s)']]){
+  c.fillStyle=color;c.fillText(label,70,y0-96);for(let k=0;k<=2;k++){c.fillText((max*k/2).toFixed(1),10,y0-90*k/2+4);c.strokeStyle='#344754';c.beginPath();c.moveTo(55,y0-90*k/2);c.lineTo(955,y0-90*k/2);c.stroke();}
+  c.strokeStyle=color;c.beginPath();a.forEach((s,i)=>{const v=key==='h'?s.h*1000:s.q,x=xs(s.t),y=y0-v/max*90;i?c.lineTo(x,y):c.moveTo(x,y);});c.stroke();
+ }
+ for(let k=0;k<=5;k++)c.fillText(String(k*60),xs(k*60)-8,285);
+ c.fillStyle='#bcd0de';c.fillText('time (s)',900,20);
+ const s=a[+$('time').value];$('hydroLabel').textContent=`目前水位變化 ${s.hRate.toFixed(3)} mm/s；入床淨量 ${s.q.toFixed(2)} g/s；外圍向上界面流 ${s.returnFlow.toFixed(2)} g/s。迴流不直接增加積水，K 的變化會影響淨入床量。`;
+}
+
+if(typeof document!=='undefined'){$('run').onclick=run;$('time').oninput=render;$('mode').onchange=render;$('play').onclick=()=>playing=!playing;timer=setInterval(()=>{if(playing&&result){$('time').value=(+$('time').value+1)%result.history.length;render();}},60);run();}
+</script></html>
