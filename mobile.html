@@ -175,6 +175,38 @@
             .pane-pools .chart-container { height:100px; }
             .app-header > span { display:none; }
         }
+        .bed-visual { display:flex; flex-direction:column; gap:4px; min-width:0; }
+        body,button,select { font-family:ui-rounded,"SF Pro Rounded","Avenir Next",-apple-system,"PingFang TC",sans-serif; font-weight:400; }
+        .app-header h1,.stage-banner { font-weight:500; }
+        @media (max-width:600px) {
+            #bedPanel { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:8px 10px; align-items:start; }
+            .bed-visual { grid-column:1; grid-row:1/4; align-self:stretch; gap:0; }
+            .bed-visual .pond-view { width:100%; height:34px; margin:0; flex-shrink:0; }
+            .bed-visual .bed-container { width:100%; aspect-ratio:1.18; align-self:stretch; }
+            .bed-visual .legend-bar { display:flex; flex-direction:column; gap:2px; font-size:0.56rem; margin-top:4px; }
+            .bed-visual .legend-bar > span { text-align:left; }
+            #bedPanel > .controls { display:contents; }
+            #bedPanel .playback-group { grid-column:2; grid-row:1; display:flex; flex-direction:column; gap:6px; width:100%; }
+            #bedPanel .stage-banner { width:100%; padding:8px; font-size:0.84rem; line-height:1.3; overflow-wrap:normal; }
+            #bedPanel .playback-group button { width:100%; min-height:36px; font-weight:500; }
+            #bedPanel .control-group:has(#heatmapMode) { grid-column:2; grid-row:2; }
+            #bedPanel .control-group:has(#grindPreset) { grid-column:2; grid-row:3; }
+            #bedPanel .control-group:has(#timeSlider) { grid-column:1/-1; grid-row:4; padding:6px 10px; background:#272727; border-radius:10px; }
+            #bedPanel .control-group { width:100%; font-size:0.75rem; }
+            #bedPanel select { font-size:14px; min-height:36px; padding:5px 2px; }
+            #bedPanel .pool-summary { grid-column:1/-1; grid-row:5; width:100%; }
+            .pool-stat:nth-of-type(2) { color:#ff9800; }
+            .pool-stat:nth-of-type(3) { color:#4db8ff; }
+            .pool-stat:nth-of-type(4) { color:#b388ff; }
+            .pool-stat strong { font-weight:500; }
+            .pane-pools .chart-container { height:clamp(180px,29svh,270px); }
+            .app-header h1 { font-size:0.95rem; letter-spacing:0; }
+        }
+        @media (max-width:600px) and (max-height:680px) {
+            #bedPanel { gap:5px 8px; }
+            .pane-pools .chart-container { height:155px; }
+            .bed-visual .pond-view { height:28px; }
+        }
     </style>
 </head>
 <body>
@@ -185,8 +217,9 @@
         <span>374 g 注水 · 含悶蒸 · 試驗模型</span>
         <select id="languageSelect" aria-label="Language"><option value="en" selected>English</option><option value="zh-TW">繁體中文</option></select>
     </header>
-    <div class="panel">
+    <div class="panel" id="bedPanel">
         <b class="panel-title">粉床狀態</b>
+        <div class="bed-visual">
         <div class="pond-view">
             <span class="pond-label">粉面積水 <strong id="pondHeightLabel">0.00 cm</strong></span>
             <svg viewBox="0 0 600 110" preserveAspectRatio="none" aria-label="粉面上方積水高度示意">
@@ -202,6 +235,7 @@
         <div class="legend-bar">
             <span id="legendLow" style="color:#f44336;">■ 紅色 (0% 殘留 / 完全耗盡)</span>
             <span id="legendHigh" style="color:#4caf50;">■ 綠色 (100% 殘留 / 未萃取)</span>
+        </div>
         </div>
         
         <div class="controls" style="margin-top: 10px;">
@@ -1416,8 +1450,10 @@
 
         const canvas = document.getElementById('bedCanvas');
         const ctx = canvas.getContext('2d');
-        const cellW = canvas.width / COLS;
-        const cellH = canvas.height / ROWS;
+        const compactBed=window.matchMedia('(max-width:600px)').matches;
+        const cellW = compactBed?Math.min(canvas.width/(2*TOP_RADIUS+2),canvas.height/ROWS):canvas.width/COLS;
+        const cellH = compactBed?cellW:canvas.height/ROWS;
+        const bedOffsetX=compactBed?(canvas.width-COLS*cellW)/2:0;
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1428,7 +1464,7 @@
             for (let y = 0; y < ROWS; y++) {
                 ctx.fillStyle = getCellColor(state, x, y, mode);
                 ctx.fillRect(
-                    x * cellW,
+                    bedOffsetX + x * cellW,
                     y * cellH,
                     cellW + 0.5,
                     cellH + 0.5
@@ -1558,6 +1594,7 @@
 
     function resizeCanvas() {
         const c1 = document.getElementById('bedCanvas');
+        document.querySelector('.pond-view svg').setAttribute('viewBox',window.matchMedia('(max-width:600px)').matches?'110 0 380 110':'0 0 600 110');
         const dpr = window.devicePixelRatio || 1;
 
         const cssWidth = c1.clientWidth;
