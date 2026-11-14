@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V60 Extraction · Presentation</title>
+    <!-- Charts are rendered locally; no network dependency. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#17191b;color:#c5c8cc;font-family:"Nunito Sans",sans-serif;font-weight:400}
+.dashboard{width:100%;max-width:680px;height:100svh;min-height:540px;margin:auto;padding:16px 16px max(16px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:18px}
+.app-header,.panel-title,.stats,.mobile-chart-tabs,.chart-choice,.pane-overall,.pane-outlet,.controls,.pool-track,.pool-summary-caption{display:none!important}
+#bedPanel{display:flex;flex-direction:column;flex:1.2;min-height:0;gap:8px}
+.bed-visual{display:flex;flex-direction:column;flex:1;min-height:0;width:100%;max-width:420px;align-self:center}
+.pond-view{position:relative;height:38px;flex-shrink:0}
+.pond-view svg{width:100%;height:100%}
+.pond-label{position:absolute;left:10px;top:3px;font-size:11px;color:#9baab3}
+.bed-container{position:relative;flex:1;min-height:0;width:100%}
+canvas{width:100%;height:100%;display:block}
+.legend-bar{display:flex;justify-content:space-between;gap:8px;font-size:9px;color:#999;line-height:1.3;padding-top:5px}
+.record-status{font-size:clamp(10px,2.7vw,13px);color:#a9adb2;white-space:nowrap;text-align:center;font-weight:400}
+.record-controls{display:flex;align-items:center;gap:10px;color:#9da2a9;font-size:12px;padding:2px 0}
+.record-controls button{font:400 12px "Nunito Sans",sans-serif;color:#bcc0c6;background:transparent;border:1px solid #3d4147;border-radius:18px;padding:6px 12px;min-height:32px}
+.record-controls input{flex:1;min-width:0;height:24px;accent-color:#a9afb7}
+.record-clock{font-variant-numeric:tabular-nums;min-width:43px;text-align:right}
+.dashboard>.panel:last-child{flex:0.9;min-height:190px}
+.pane-pools{display:grid!important;grid-template-columns:minmax(0,1fr) 82px;gap:10px;height:100%;align-items:stretch}
+.pane-pools .chart-container{height:100%;min-height:0;position:relative}
+.pool-summary{display:flex;flex-direction:column;justify-content:space-evenly;gap:12px;padding:10px 0 24px}
+.pool-stat{font-size:12px;line-height:1.4;background:none;padding:0}
+.pool-stat strong{display:block;font-weight:500;font-size:24px;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+.pool-stat:nth-of-type(2){color:#ff9800}.pool-stat:nth-of-type(3){color:#4db8ff}.pool-stat:nth-of-type(4){color:#b388ff}
+@media(max-height:650px){.dashboard{padding:10px 12px;gap:10px}.pond-view{height:28px}.pool-stat strong{font-size:21px}}
+</style>
+</head>
+<body>
+
+<div class="dashboard">
+    <header class="app-header">
+        <h1>手沖萃取模擬器（v3.4 簡化版）</h1>
+        <span>374 g 注水 · 含悶蒸 · 試驗模型</span>
+        <select id="languageSelect" aria-label="Language"><option value="en" selected>English</option><option value="zh-TW">繁體中文</option></select>
+    </header>
+    <div class="panel" id="bedPanel">
+        <b class="panel-title">粉床狀態</b>
+        <div class="bed-visual">
+        <div class="pond-view">
+            <span class="pond-label">粉面積水 <strong id="pondHeightLabel">0.00 cm</strong></span>
+            <svg viewBox="0 0 600 110" preserveAspectRatio="none" aria-label="粉面上方積水高度示意">
+                <path d="M 80 5 L 127 105 L 473 105 L 520 5" fill="none" stroke="#647782" stroke-width="2"/>
+                <path id="pondFill" d="M127 105 L473 105 L473 105 L127 105 Z" fill="#258bc0" fill-opacity="0.65"/>
+                <path id="pondSurface" d="M127 105 L473 105" fill="none" stroke="#a3e6ff" stroke-width="2"/>
+                <path d="M127 105 L473 105" stroke="#a28e72" stroke-width="3"/>
+            </svg>
+        </div>
+        <div class="canvas-container bed-container">
+            <canvas id="bedCanvas"></canvas>
+        </div>
+        <div class="legend-bar">
+            <span id="legendLow" style="color:#f44336;">■ 紅色 (0% 殘留 / 完全耗盡)</span>
+            <span id="legendHigh" style="color:#4caf50;">■ 綠色 (100% 殘留 / 未萃取)</span>
+        </div>
+        </div>
+        
+        <div class="controls" style="margin-top: 10px;">
+            <div class="playback-group">
+                <div id="stageBanner" class="stage-banner" role="status">悶蒸</div>
+                
+            </div>
+            <div class="control-group">
+                <label>顯示：</label>
+                <select id="heatmapMode"><option value="total" selected>總萃取狀態</option><option value="pool0">快池</option><option value="pool1">中池</option><option value="pool2">慢池</option><option value="small">細粉</option><option value="main">粗粉</option><option value="transport">內部水流</option><option value="liquid">液相濃度</option><option value="contact">受擾影響</option></select>
+            </div>
+            <p class="note">注水：77 → 123 → 174 g，140 s 注完。</p>
+            <div class="control-group">
+                <label>研磨度：</label>
+                <select id="grindPreset">
+                    <option value="blue">細</option>
+                    <option value="yellow" selected>中</option>
+                    <option value="coarse">粗</option>
+                </select>
+                
+            </div>
+            <div class="control-group">
+                <label>沖煮時間：<span id="timeLabel">0.0</span> s</label>
+                
+                <div class="timeline-note">
+                    <span>0–42 s：簡化悶蒸</span>
+                    <span id="phaseLabel" class="highlight">0 s 開始簡化悶蒸</span>
+                    <span id="finishTimeLabel">滴濾完成：—</span>
+                </div>
+            </div>
+        </div>
+        
+
+        <div class="record-status"><span id="recordStage">Bloom</span> · Overall extraction · Medium size</div>
+        <div class="record-controls"><button id="playBtn">Play / Pause</button><input type="range" id="timeSlider" min="0" max="300" value="0" step="0.5" aria-label="Brew time"><span id="recordClock" class="record-clock">0.0 s</span></div>
+        <div class="stats">
+            <div class="stat-card">頂部積水<strong class="stat-value water-color"><span id="waterLevelLabel">0.00</span> cm</strong></div>
+            <div class="stat-card">細粉完成度<strong class="stat-value fast-color"><span id="smallEyLabel">0.00</span> %</strong></div>
+            <div class="stat-card"><span id="mainEyCaption">粗粉完成度</span><strong class="stat-value slow-color"><span id="mainEyLabel">0.00</span> %</strong></div>
+            <div class="stat-card">總萃取率<strong class="stat-value"><span id="eyLabel">0.00</span> %</strong></div>
+            <div class="stat-card">TDS<strong class="stat-value"><span id="tdsLabel">0.00</span> %</strong></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <input class="chart-choice" type="radio" name="mobileChart" id="tabOverall" checked>
+        <input class="chart-choice" type="radio" name="mobileChart" id="tabPools">
+        <input class="chart-choice" type="radio" name="mobileChart" id="tabOutlet">
+        <nav class="mobile-chart-tabs" aria-label="Charts">
+            <label for="tabOverall">萃取進度</label><label for="tabPools">三池萃取進度</label><label for="tabOutlet">出口變化</label>
+        </nav>
+        <section class="chart-pane pane-overall">
+        <b class="panel-title">萃取進度</b>
+        <div class="canvas-container chart-container">
+            <canvas id="chartCanvas"></canvas>
+        </div>
+        </section><section class="chart-pane pane-pools">
+        <b class="panel-title" style="margin-top: 6px;">三池萃取進度</b>
+        <div class="canvas-container chart-container"><canvas id="poolCanvas"></canvas></div>
+        <div class="pool-summary">
+            <div class="pool-summary-caption">各池已釋出比例（非風味比例）</div>
+            <div class="pool-stat"><span>快池</span><strong id="fastRelease">0.0%</strong><div class="pool-track"><i id="fastBar"></i></div></div>
+            <div class="pool-stat"><span>中池</span><strong id="midRelease">0.0%</strong><div class="pool-track"><i id="midBar"></i></div></div>
+            <div class="pool-stat"><span>慢池</span><strong id="slowRelease">0.0%</strong><div class="pool-track"><i id="slowBar"></i></div></div>
+        </div>
+        </section><section class="chart-pane pane-outlet">
+        <b class="panel-title" style="margin-top: 6px;">出口變化</b>
+        <div class="canvas-container diagnostic-container">
+            <canvas id="diagnosticCanvas"></canvas>
+        </div>
+        </section>
+    </div>
+
+</div>
+
+<script>
+    // Standalone canvas charts. Retains the model's existing chart data interface.
+    class Chart {
+        constructor(ctx,config){this.ctx=ctx;this.canvas=ctx.canvas;this.data=config.data;this.options=config.options;this.observer=new ResizeObserver(()=>this.update());this.observer.observe(this.canvas.parentElement);}
+        destroy(){this.observer.disconnect();}
+        update(){
+            const c=this.canvas,box=c.parentElement.getBoundingClientRect();if(box.width<1||box.height<1)return;
+            const w=box.width,h=box.height,dpr=window.devicePixelRatio||1;c.width=Math.round(w*dpr);c.height=Math.round(h*dpr);
+            const g=this.ctx;g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
+            const left=30,right=8,top=22,bottom=27,pw=w-left-right,ph=h-top-bottom;if(pw<=0||ph<=0)return;
+            const scales=this.options.scales||{},sets=this.data.datasets,n=this.data.labels.length;
+            const bounds={};for(const ds of sets){const key=ds.yAxisID||'y',axis=scales[key]||{};bounds[key]={min:axis.min||0,max:axis.max||Math.max(1,...sets.filter(s=>(s.yAxisID||'y')===key).flatMap(s=>s.data))*1.1};}
+            g.font='11px "Nunito Sans", sans-serif';g.textBaseline='middle';
+            for(let j=0;j<=4;j++){const y=top+ph*j/4;g.strokeStyle='#383838';g.beginPath();g.moveTo(left,y);g.lineTo(w-right,y);g.stroke();let a=Object.values(bounds)[0]||{min:0,max:100};g.fillStyle='#a9a9a9';g.textAlign='right';g.fillText((a.max-(a.max-a.min)*j/4).toFixed(a.max<=10?1:0),left-5,y);}
+            const keys=Object.keys(bounds);if(keys.length>1){g.textAlign='left';let a=bounds[keys[1]];for(let j=0;j<=4;j++)g.fillText((a.max-(a.max-a.min)*j/4).toFixed(1),w-right+5,top+ph*j/4);}
+            sets.forEach((ds,k)=>{const a=bounds[ds.yAxisID||'y'];g.strokeStyle=ds.borderColor;g.lineWidth=ds.borderWidth||2;g.setLineDash(ds.borderDash||[]);g.beginPath();ds.data.forEach((v,i)=>{const x=left+(n>1?i/(n-1):0)*pw,y=top+ph*(1-(v-a.min)/(a.max-a.min));if(i===0)g.moveTo(x,y);else g.lineTo(x,y);});g.stroke();g.setLineDash([]);g.fillStyle=ds.borderColor;g.textAlign='left';g.font='11px "Nunito Sans", sans-serif';if(c.id!=='poolCanvas')g.fillText(ds.label,5+k*(w/sets.length),12,w/sets.length-8);});
+            g.fillStyle='#aaa';g.textAlign='center';for(let j=0;j<=4;j++){const i=Math.round((n-1)*j/4);if(i>=0)g.fillText(this.data.labels[i],left+pw*j/4,h-17);}
+            g.textAlign='right';g.fillText('s',w-2,h-6);
+            if(c.id==='poolCanvas'){g.textAlign='left';g.fillStyle='#999';g.fillText('Released (%)',left,10);}
+        }
+    }
+    let uiLanguage='en';
+    const EN_TEXT={
+        '各池已釋出比例（非風味比例）':'Released from each pool · not flavor proportions',
+        '手沖萃取模擬器（v3.4 簡化版）':'Pour-over Extraction Simulator (v3.4)',
+        '374 g 注水 · 含悶蒸 · 試驗模型':'374 g water · Bloom included · Experimental model',
+        '粉面上方積水高度示意':'Ponding height above the coffee bed',
+        '粉床狀態':'Coffee bed', '粉面積水':'Ponding height',
+        '播放 / 暫停':'Play / Pause','顯示：':'View:',
+        '總萃取狀態':'Overall extraction','快池':'Fast pool','中池':'Medium pool','慢池':'Slow pool',
+        '內部水流':'Internal water flow','液相濃度':'Liquid concentration','受擾影響':'Agitation effect',
+        '注水：77 → 123 → 174 g，140 s 注完。':'Pours: 77 → 123 → 174 g · Finish pouring at 140 s.',
+        '研磨度：':'Grind:','細':'Fine','中':'Medium','粗':'Coarse',
+        '沖煮時間：':'Brew time:','0–42 s：簡化悶蒸':'0–42 s: Simplified bloom',
+        '0 s 開始簡化悶蒸':'Simplified bloom starts at 0 s',
+        '第一段注水':'First pour','第二段注水':'Second pour','段間等待':'Between pours',
+        '簡化悶蒸':'Simplified bloom','正式注水':'Pouring','悶蒸':'Bloom','滴濾中':'Drawdown',
+        '滴濾完成：':'Drawdown complete: ','滴濾完成':'Drawdown complete',' s 內尚未完成':' s — not yet complete',
+        '頂部積水':'Ponding height','細粉完成度':'Fines completion',
+        '粗粉完成度（滴濾完成時）':'Coarse completion (at drawdown)', '粗粉完成度':'Coarse completion',
+        '總萃取率':'Extraction yield','三池萃取進度':'Three-pool extraction progress','萃取進度':'Extraction progress','出口變化':'Outlet dynamics',
+        '總可溶物完成度':'Total soluble release', '細粉族群（<100 µm）':'Fines (<100 µm)', '粗粉族群（≥100 µm）':'Coarse particles (≥100 µm)',
+        '沖煮時間 (s)':'Brew time (s)','族群庫存釋放完成度 (%)':'Soluble inventory released (%)','各池庫存釋放完成度 (%)':'Pool inventory released (%)',
+        '下壺溶質速率 (mg/s)':'Solute outflow (mg/s)','瞬時出口 TDS (%)':'Instant outlet TDS (%)','瞬時 TDS (%)':'Instant TDS (%)',
+        '深藍色（低濃度）':'Dark blue (low concentration)','紅色（完全耗盡）':'Red (depleted)',
+        '黃色（高濃度）':'Yellow (high concentration)','綠色（尚未萃取）':'Green (unextracted)',
+        '紅色 (0% 殘留 / 完全耗盡)':'Red (0% remaining / depleted)','綠色 (100% 殘留 / 未萃取)':'Green (100% remaining / unextracted)',
+        '尚無床內水流':'No bed flow yet','色階上限（此刻最高':'scale maximum (current peak',
+        '（此刻最高':' (current peak ','）':')','細粉':'Fines','粗粉':'Coarse particles'
+    };
+    const translationKeys=Object.keys(EN_TEXT).sort((a,b)=>b.length-a.length);
+    function translateText(text){
+        if(uiLanguage!=='en')return text;
+        if(EN_TEXT[text.trim()])return text.replace(text.trim(),EN_TEXT[text.trim()]);
+        // Longest-match replacement in one pass avoids translating inside replacements.
+        const pattern=new RegExp(translationKeys.filter(k=>!['細','中','粗'].includes(k)).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');
+        return text.replace(pattern,k=>EN_TEXT[k]);
+    }
+    const localizedNodes=new WeakMap();
+    function localizeDisplay(){
+        document.documentElement.lang=uiLanguage;
+        document.title=translateText('手沖萃取模擬器（v3.4 簡化版）');
+        const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+        while(walker.nextNode()){
+            const node=walker.currentNode;
+            if(!node.parentElement||node.parentElement.closest('script,style,#languageSelect'))continue;
+            const old=localizedNodes.get(node);
+            const source=old&&node.nodeValue===old.rendered?old.source:node.nodeValue;
+            const rendered=translateText(source);
+            if(node.nodeValue!==rendered)node.nodeValue=rendered;
+            localizedNodes.set(node,{source,rendered});
+        }
+        document.querySelector('.pond-view svg').setAttribute('aria-label',translateText('粉面上方積水高度示意'));
+        for(const chart of [brewChart,poolChart,diagnosticChart]){
+            if(!chart)continue;
+            for(const ds of chart.data.datasets){ds.originalLabel??=ds.label;ds.label=translateText(ds.originalLabel);}
+            for(const axis of Object.values(chart.options.scales||{}))if(axis.title){axis.title.originalText??=axis.title.text;axis.title.text=translateText(axis.title.originalText);}
+            chart.update('none');
+        }
+    }
+    // ========================= 基本網格設定 =========================
+    // 更高密度的粉床網格：將原本 20 × 10 提升至 60 × 30。
+    // ROWS 增加後，濾杯底部可以真正收斂至尖端，而不是截斷成一段圓形底部。
+    const FIXED=Object.freeze({"transportMode":"D","circulationGamma":"1","contactGain":"8","contactBase":"0.5","impactWidth":"0.6","impactSoft":"0.3","wetTau":"15","diffMultiplier":"1.43466796875","khCalibration":"0.26330078125","modelPreset":"three","pourPreset":"4.971428571"});
+    const COLS = 60;
+    const ROWS = 30;
+    const BLOOM_TIME = 0;    // 本版從第一次悶蒸注水開始計時
+    const TOTAL_TIME = 300;   // 包含簡化悶蒸與後續滴濾
+    const DISPLAY_END_TIME = BLOOM_TIME + TOTAL_TIME;
+    const DT = 0.5;           // 時間步長 (秒)
+
+    // ========================= 咖啡化學組成假設 =========================
+    // v3.4 簡化版 保留單池基準；三池為有效化學動力學族群，各自跨兩種 PSD 粒徑。
+    // C_eq,p = f_p C_ref (M_p / M_p,max)。各池僅感受自身液相濃度。
+    // 每個化學池可接觸同一顆粒表面，表面積不再乘化學比例。
+    //
+    // 舊三池參數完整保留，供後續重新啟用；本版只沿用加權濃度，未沿用三池速率。
+    const LEGACY_THREE_POOL_PRESET = Object.freeze({
+        fast: Object.freeze({ fraction: 0.20, kIntAreaBase: 2.5,   cSat: 0.18, label: '快溶／酸質' }),
+        mid:  Object.freeze({ fraction: 0.60, kIntAreaBase: 0.08,  cSat: 0.25, label: '中溶／甜感' }),
+        slow: Object.freeze({ fraction: 0.20, kIntAreaBase: 0.008, cSat: 0.10, label: '慢溶／苦澀' })
+    });
+
+    // C_SAT_SINGLE is a legacy name: Ceq0=0.206 g/cm^3 is an uncalibrated
+    // linear-partition reference, NOT a measured thermodynamic solubility.
+    // Three-pool kinetic parameters above are archived, not used for kinetics.
+    const C_SAT_SINGLE =
+        LEGACY_THREE_POOL_PRESET.fast.fraction * LEGACY_THREE_POOL_PRESET.fast.cSat
+        + LEGACY_THREE_POOL_PRESET.mid.fraction * LEGACY_THREE_POOL_PRESET.mid.cSat
+        + LEGACY_THREE_POOL_PRESET.slow.fraction * LEGACY_THREE_POOL_PRESET.slow.cSat;
+
+    // 文獻上常引用的「最大可萃取率」上限（約 28-30%）：
+    // 即使沖煮時間無限長，咖啡乾料中也只有這個比例的物質溶得出來，
+    // 其餘是不溶的纖維質。這個常數取代了舊版寫死在 TDS 公式裡的「15」與「0.8」。
+    const EY_MAX_FRACTION = 0.28;
+
+    // Gagné 圖片數位化後，以三個 lognormal 成分重建完整的體積 PSD，
+    // 再以固定 100 µm 分成互不重疊的細粉與粗粉。每群保留兩個矩：
+    // dArea = d32 = F / Σ(w/d)，保留表面積與早期短程傳質；
+    // dDiff = sqrt[Σ(w d²)/F]，保留球內擴散的平均時間尺度。
+    // bedD32 是由完整 PSD 直接計算的整體 Sauter diameter，供粉床滲透率使用。
+    // Blue、Yellow 來自圖片數位化與擬合；coarse 則是由 Yellow 的
+    // 三個 lognormal 成分外推到 D50=800 µm 的敏感度情境，不是實測曲線。
+    // 所有數值都只是情境輸入，不是本磨豆機的校正真值。
+    const GAGNE_PSD = Object.freeze({
+        blue: Object.freeze({
+            name: '細（Blue）', d10: 44.364, d50: 331.105, d90: 551.031,
+            fineFraction: 0.186644, bedD32: 133.917,
+            fine: Object.freeze({ dArea: 38.330, dDiff: 50.947 }),
+            coarse: Object.freeze({ dArea: 313.076, dDiff: 408.087 })
+        }),
+        yellow: Object.freeze({
+            name: '中（Yellow／V60 基準）', d10: 142.560, d50: 605.384, d90: 930.495,
+            fineFraction: 0.081083, bedD32: 258.542,
+            fine: Object.freeze({ dArea: 40.746, dDiff: 54.252 }),
+            coarse: Object.freeze({ dArea: 489.343, dDiff: 679.146 })
+        }),
+        coarse: Object.freeze({
+            name: '粗（外推／D50 ≈ 800 µm）',
+            d10: 250.093, d50: 800.000, d90: 1217.607,
+            fineFraction: 0.049529, bedD32: 362.560,
+            fine: Object.freeze({ dArea: 40.032, dDiff: 52.967 }),
+            coarse: Object.freeze({ dArea: 624.928, dDiff: 882.658 }),
+            extrapolated: true
+        })
+    });
+    const GAGNE_REFERENCE = GAGNE_PSD.yellow;
+    const REFERENCE_AREA_DIAMETER_UM = GAGNE_REFERENCE.coarse.dArea;
+    const REFERENCE_DIFFUSION_DIAMETER_UM = GAGNE_REFERENCE.coarse.dDiff;
+    const REFERENCE_HYDRAULIC_DIAMETER_UM = GAGNE_REFERENCE.bedD32;
+
+    // 這項重建只用於自我檢查：兩個不重疊族群的 d32 應重現完整 PSD 的 bedD32。
+    function reconstructedBedSauterDiameter(psd) {
+        return 1.0 / (
+            psd.fineFraction / psd.fine.dArea
+            + (1.0 - psd.fineFraction) / psd.coarse.dArea
+        );
+    }
+    Object.values(GAGNE_PSD).forEach(psd => {
+        const reconstructed = reconstructedBedSauterDiameter(psd);
+        const relativeError = Math.abs(reconstructed - psd.bedD32) / psd.bedD32;
+        if (relativeError > 0.002) {
+            console.warn('PSD moment reduction does not preserve bed d32:', psd.name);
+        }
+    });
+
+    const TARGET_VOLUME = 374.0; // 目標注水量 (g)
+    const WATER_DENSITY = 1.0;   // g / mL（此版本以水的質量與體積近似 1:1）
+    const BASE_DOSE = 20.0;
+    const BASE_BED_HEIGHT = 5.0;   // cm；20 g 預浸後的暫定平均粉床高度
+    const POROSITY = 0.58;         // 鬆散、已潤濕手沖粉床的暫定孔隙率
+
+    // ========================= 流體力學參數 =========================
+    // 等效水力傳導率基準值 Kh（cm/s），不是本徵滲透率 k（m²）。
+    // 若使用 SI：Kh = k rho g / mu。PSD 只設定相對尺度，絕對值仍待粉床實驗校正。
+    const K_PERM_BASE   = 1.0; // provisional medium-grind Kh, cm/s; not a validated fit
+
+    // Gagné 將濾紙參數定義為 beta = k_filter / L_filter（長度單位）。
+    // 1 mD/µm = 9.869233e-8 cm；beta=2.09 為使用者選定的暫定試驗值。
+    // a_open 是底孔之外濾紙沒有貼壁、可以排水的有效面積比例，不是 beta。
+    const FILTER_BETA_MDPERUM = 2.09;
+    const MDPERUM_TO_CM = 9.869233e-8;
+    const GRAVITY_CM_S2 = 980.665;
+    const WATER_KINEMATIC_VISCOSITY_CM2_S = 0.00325; // 約 90°C
+    const FILTER_HEAD_CONDUCTANCE =
+        GRAVITY_CM_S2 * FILTER_BETA_MDPERUM * MDPERUM_TO_CM
+        / WATER_KINEMATIC_VISCOSITY_CM2_S;            // Gf = g beta / nu, s^-1
+    const A_OPEN = 0.2; // shared effective opening fraction for side-coffee and pure bypass
+    const V60_OUTLET_RADIUS_CM = 1.0;                 // 先採底孔直徑約 2 cm
+    const HYDRAULIC_RADIAL_STEPS = 240;
+    // Beta 流線函數控制中央下沉／外圍回流的形狀。僅作局部有效交換速度；
+    // Darcy 層流量完全由水力積分決定，不受此經驗場重分配。
+    const BETA_RECIRCULATION_STRENGTH = 3.0;
+    const JET_AREA_CM2 = 0.20;                 // 約等效於直徑 5.05 mm 的水柱
+    // 中研磨 Q=5.00 g/s 時，以 15/30 = 50% 粉床厚度作為擾動深度基準。
+    // 因此粉床由 8.0 cm 改為 5.0 cm 後，仍是 15 個數值層，但實際深度
+    // 會由 4.0 cm 等比例改為 2.50 cm；不同粉量也維持相同厚度比例。
+    const REFERENCE_IMPACT_FLOW_RATE = 5.0;
+    const REFERENCE_IMPACT_DEPTH_FRACTION = 15.0 / ROWS;
+    const IMPACT_DEPTH_FLOW_EXPONENT = 0.78;
+    // ========================= 外部傳質參數 =========================
+    // External film: actual d32 in cm, velocity cm/s, diffusion cm^2/s.
+    // Transport attenuation and effective diffusivity are provisional, not fitted.
+    const MASS_DIFFUSIVITY = 0.00001;       // 液相有效擴散係數 cm²/s，暫定
+    const KINEMATIC_VISCOSITY = 0.00325;    // ν = μ/ρ，cm²/s
+    // v2.6: cm, s, g throughout. These are provisional scenarios, NOT Moroney fits.
+    const INTERNAL_DIFFUSIVITY_CM2_S = 0.000002;
+    const EXTERNAL_TRANSFER_FACTOR = 0.5; // effective film attenuation; sensitivity assumption
+    const SH_BASE = 2.0;                 // 無強迫對流時的球形擴散基線
+    const SH_FLOW_COEFF = 1.1;           // packed-bed 型經驗係數
+    const SH_RE_EXPONENT = 0.60;         // 對流增強項 Re^0.6
+    const SH_SC_EXPONENT = 1.0 / 3.0;    // Schmidt number 指數
+    // 水流熱圖採固定色階，才能直接比較不同研磨、粉量與水柱力道。
+    const FLOW_HEATMAP_MAX_CM_S = 1.5;
+
+    // 液相有限體積數值參數。橫向係數仍是等效分散的待校正值；
+    // 垂直平流會自動切分子時間步，使每個子步的 Courant number 不超過 0.8。
+    const LATERAL_DISPERSION_CM2_S = 0.005555555555555556;
+    const THREE_POOLS = [
+        {label:'快池', fraction:0.2, diffusivity:4e-6, color:'#ff9800'},
+        {label:'中池', fraction:0.6, diffusivity:1e-6, color:'#4caf50'},
+        {label:'慢池', fraction:0.2, diffusivity:2.5e-7, color:'#b388ff'}
+    ];
+    let singleHistory=[], threeHistory=[], comparisonChart, poolChart;
+    let dispersionFaces=[], dispersionMaxRate=0;
+    // Equivalent prismatic row cells: aqueous face area Vwater/dx. Not an annular mesh.
+    function buildDispersionFaces(geometry){
+        dispersionFaces=[];const outgoing=new Float64Array(COLS*ROWS);
+        for(let y=0;y<ROWS;y++){
+            const cells=[];for(let x=0;x<COLS;x++)if(VALID_MASK[idx(x,y)])cells.push(idx(x,y));
+            const dx=2*geometry.bedRadius*(1-(y+0.5)/ROWS)/cells.length;
+            for(let n=0;n<cells.length-1;n++){
+                const a=cells[n],b=cells[n+1],Va=liquidWaterMassPerCell*cellVolumeWeights[a]/WATER_DENSITY,Vb=liquidWaterMassPerCell*cellVolumeWeights[b]/WATER_DENSITY;
+                const G=LATERAL_DISPERSION_CM2_S*2*Va*Vb/(Va+Vb)/(dx*dx);
+                dispersionFaces.push({a,b,Va,Vb,G});outgoing[a]+=G/Va;outgoing[b]+=G/Vb;
+            }
+        }
+        dispersionMaxRate=Math.max(...outgoing);
+    }
+    const MAX_ADVECTION_COURANT = 0.80;
+
+    // ========================= 粉層幾何（與研磨/流速無關，只算一次）=========================
+    // V60 官方規格：濾杯錐體「全開口角」為 60 度（兩側杯壁經底部尖端的夾角）。
+    // 換算成中軸線量起的半頂角 = 60°/2 = 30°，tan(30°) ≈ 0.577，
+    // 即粉層每往下一層，半徑縮小 0.577 格（舊版寫死 "10 - y"，等同半頂角 45 度，
+    // 是一個更淺、更快收尖的錐形，並非真正的 V60 比例）。
+    const CONE_FULL_ANGLE_DEG = 60;
+    const CONE_HALF_ANGLE_RAD = (CONE_FULL_ANGLE_DEG / 2) * Math.PI / 180;
+    const CONE_SLOPE = Math.tan(CONE_HALF_ANGLE_RAD); // 每向下一格，半徑縮小的格數
+
+    // 令最後一列收斂至接近單一尖端 cell。
+    // TOP_RADIUS 由 ROWS 與 V60 60° 幾何反推，而不是直接等於 COLS / 2。
+    const APEX_RADIUS = 0.55; // even COLS: >=0.5 ensures the final layer has two mirrored cells
+    const TOP_RADIUS = APEX_RADIUS + (ROWS - 1) * CONE_SLOPE;
+
+    function inCone(x, y) {
+        const center = (COLS - 1) / 2;
+        const radius = Math.max(APEX_RADIUS, TOP_RADIUS - y * CONE_SLOPE);
+        return Math.abs(x - center) <= radius;
+    }
+    function idx(x, y) { return y * COLS + x; }
+
+    // Independent horizontal support, clipped by the local cone wall.
+    function impactHalfWidth(z,depth){
+        const radius=Math.max(0,TOP_RADIUS-z*CONE_SLOPE);
+        const fraction=Number(FIXED.impactWidth||'0.6');
+        return fraction===0?Math.min(radius,depth*.65):fraction*radius;
+    }
+    function impactRadialWeight(r,w){
+        if(w<=0)return 0;
+        const x=Math.abs(r)/w;
+        const soft=Number(FIXED.impactSoft||'0.3');
+        if(x>=1)return 0;if(x<=1-soft)return 1;
+        return .5*(1+Math.cos(Math.PI*(x-(1-soft))/soft));
+    }
+    function impactDepthRowsFromJetSpeed(flowRate, hydraulicScale) {
+        if (flowRate <= 0) return 0;
+        const jetVelocity = flowRate / JET_AREA_CM2;
+        const referenceJetVelocity =
+            REFERENCE_IMPACT_FLOW_RATE / JET_AREA_CM2;
+        const referenceDepthRows =
+            REFERENCE_IMPACT_DEPTH_FRACTION * ROWS;
+        const impactPsdScale = Math.max(hydraulicScale, 0);
+        return Math.min(
+            ROWS - 1,
+            referenceDepthRows
+                * Math.pow(
+                    jetVelocity / referenceJetVelocity,
+                    IMPACT_DEPTH_FLOW_EXPONENT
+                )
+                * impactPsdScale
+        );
+    }
+
+    // 建立無因次的 axisymmetric-equivalent Beta 流線場。
+    // qz > 0 是中央向下，qz < 0 是外圍向上；speed 保留兩者的大小。
+    // 最後以全場最大速率正規化，讓強度另由 BETA_RECIRCULATION_STRENGTH 控制。
+    function buildBetaRecirculationField(depthRows) {
+        const downward = Array.from({ length: ROWS }, () => new Float32Array(COLS));
+        const speed = Array.from({ length: ROWS }, () => new Float32Array(COLS));
+        if (depthRows <= 0) return { downward, speed };
+
+        const centerX = (COLS - 1) / 2;
+        let maxSpeed = 0;
+        for (let y = 0; y < ROWS; y++) {
+            const eta = (y + 0.5) / depthRows;
+            if (eta <= 0 || eta >= 1) continue;
+            const radius = Math.max(APEX_RADIUS, TOP_RADIUS - y * CONE_SLOPE);
+            const Fz = 6.75 * eta * Math.pow(1 - eta, 2);
+            const FzPrime = 6.75 * (1 - eta) * (1 - 3 * eta);
+
+            for (let x = 0; x < COLS; x++) {
+                if (!VALID_MASK[idx(x, y)]) continue;
+                const radialDistance = Math.abs(x - centerX);
+                const xi = radialDistance / radius;
+                if (xi >= 1) continue;
+
+                const Fr = 16 * xi * xi * Math.pow(1 - xi, 2);
+                const FrPrime = 32 * xi * (1 - xi) * (1 - 2 * xi);
+                const safeRadius = Math.max(radialDistance, 1e-6);
+                const dPsiDr = FrPrime * Fz / radius;
+                const dXiDy = xi * CONE_SLOPE / radius;
+                const dPsiDy =
+                    FrPrime * dXiDy * Fz + Fr * FzPrime / depthRows;
+                const qz = dPsiDr / safeRadius;
+                const qr = -dPsiDy / safeRadius;
+                const localSpeed = Math.hypot(qz, qr);
+                downward[y][x] = Math.max(0, qz);
+                speed[y][x] = localSpeed;
+                maxSpeed = Math.max(maxSpeed, localSpeed);
+            }
+        }
+
+        if (maxSpeed > 0) {
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    downward[y][x] /= maxSpeed;
+                    speed[y][x] /= maxSpeed;
+                }
+            }
+        }
+        return { downward, speed };
+    }
+
+    const VALID_MASK = new Uint8Array(COLS * ROWS);
+    let VALID_CELLS = 0;
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            if (inCone(x, y)) { VALID_MASK[idx(x, y)] = 1; VALID_CELLS++; }
+        }
+    }
+
+    // ========================= 全域狀態 =========================
+    let soluteGrids;           // [細粉, 粗粉]：同一化學池的固相剩餘質量 (g)
+    let liquidSoluteGrids;     // [細粉來源, 粗粉來源]：每格孔隙液相溶質質量 (g)
+    let liquidWaterMassPerCell;// 平均格孔隙水質量；乘 cellVolumeWeights 得實際固定水量 (g)
+    let cellVolumeWeights; // 每層精確錐殼體積分配；同層等體積，跨層不同，時間上固定
+    let wetAgeStepGrid;        // 每格接觸流動水後經過的 DT 步數
+    let soluteCellMaxByClass;  // 平均格、每粒徑族群的最大可溶出量 (g)
+    let soluteMaxByClass;      // 全床、每粒徑族群的最大可溶出量 (g)
+    let soluteMaxMassTotal;    // 全床最大可溶出量 (g)
+    let activeParticleClasses;
+    let doseGrams = 20;
+    let history = [];
+    let isPlaying = false;
+    let animationId = null;
+    let brewChart;
+    let diagnosticChart;
+
+    function sumGrid(grid) {
+        let sum = 0;
+        for (let i = 0; i < grid.length; i++) sum += grid[i];
+        return sum;
+    }
+
+    // 將相鄰兩列的水流以累積流量座標配對。每一來源格的全部流量
+    // 都會被送到下一列的一個或數個目的格；碰到錐壁或底部則流出粉床。
+    // 這比只把溶質留在同一 x 更能保持每個目的格的進、出水量一致。
+    function buildVerticalFlowLinks(qGrid) {
+        const links = Array.from({length: ROWS},()=>Array.from({length: COLS},()=>[]));
+        for(let y=0;y<ROWS;y++) {
+            const sources=[];
+            for(let x=0;x<COLS;x++) if(qGrid[y][x]>0) sources.push({x,total:qGrid[y][x],remaining:qGrid[y][x]});
+            const next=y+1<ROWS?qGrid[y+1]:new Float64Array(COLS);
+            let exit=Math.max(0,sources.reduce((a,b)=>a+b.total,0)-next.reduce((a,b)=>a+b,0));
+            // Remove the prescribed Darcy side discharge at the outer cells first.
+            const outer=[...sources].sort((a,b)=>Math.abs(b.x-(COLS-1)/2)-Math.abs(a.x-(COLS-1)/2));
+            for(const source of outer){const q=Math.min(exit,source.remaining);if(q>0)links[y][source.x].push({destination:-1,fraction:q/source.total});source.remaining-=q;exit-=q;}
+            let k=0;
+            for(let x=0;x<COLS;x++) {
+                let demand=next[x];
+                while(demand>1e-14 && k<sources.length){const source=sources[k];const q=Math.min(demand,source.remaining);if(q>0)links[y][source.x].push({destination:idx(x,y+1),fraction:q/source.total});demand-=q;source.remaining-=q;if(source.remaining<1e-14)k++;}
+            }
+        }
+        return links;
+    }
+
+    // 以舊 map 計算全部流出，再一次提交新 map。若 Co 太大，自動切分子步；
+    // 因此一個子步內溶質至多跨過一列，不會由上到下原地連鎖更新。
+    function advectLiquidSolute(liquidGrids, qGrid, flowLinks, duration) {
+        const cupByClass = liquidGrids.map(() => 0);
+        if (duration <= 0) {
+            return {
+                grids: liquidGrids,
+                cupByClass,
+                substeps: 0,
+                maxCourant: 0
+            };
+        }
+
+        let maxCourant = 0;
+        for (let y = 0; y < ROWS; y++) {
+            for (let x = 0; x < COLS; x++) {
+                maxCourant = Math.max(
+                    maxCourant,
+                    qGrid[y][x] * duration / Math.max(liquidWaterMassPerCell*cellVolumeWeights[idx(x,y)], 1e-12)
+                );
+            }
+        }
+        const substeps = Math.max(
+            1,
+            Math.ceil(maxCourant / MAX_ADVECTION_COURANT)
+        );
+        const subDt = duration / substeps;
+        let current = liquidGrids;
+
+        for (let substep = 0; substep < substeps; substep++) {
+            const next = current.map(grid => grid.slice());
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    const i = idx(x, y);
+                    if (!VALID_MASK[i] || qGrid[y][x] <= 0) continue;
+                    const outFraction = Math.min(
+                        MAX_ADVECTION_COURANT,
+                        qGrid[y][x] * subDt / Math.max(liquidWaterMassPerCell*cellVolumeWeights[i], 1e-12)
+                    );
+                    const localLinks = flowLinks[y][x];
+                    if (!localLinks.length || outFraction <= 0) continue;
+
+                    for (let classIndex = 0; classIndex < current.length; classIndex++) {
+                        const outMass = current[classIndex][i] * outFraction;
+                        next[classIndex][i] -= outMass;
+                        for (const link of localLinks) {
+                            const movedMass = outMass * link.fraction;
+                            if (link.destination < 0) {
+                                cupByClass[classIndex] += movedMass;
+                            } else {
+                                next[classIndex][link.destination] += movedMass;
+                            }
+                        }
+                    }
+                }
+            }
+            current = next;
+        }
+
+        return { grids: current, cupByClass, substeps, maxCourant };
+    }
+
+    // Synchronous conservative face flux; substeps enforce positivity and a maximum principle.
+    function disperseLiquidSolute(liquidGrids,duration=DT){
+        const n=Math.max(1,Math.ceil(duration*dispersionMaxRate/0.8)),dt=duration/n;
+        let current=liquidGrids;
+        for(let step=0;step<n;step++){
+            current=current.map(grid=>{
+                const next=grid.slice();
+                for(const f of dispersionFaces){
+                    const dm=dt*f.G*(grid[f.a]/f.Va-grid[f.b]/f.Vb);
+                    next[f.a]-=dm;next[f.b]+=dm;
+                }
+                return next;
+            });
+        }
+        return current;
+    }
+
+    // 固定顆粒表面濃度下，均勻初始濃度球體的平均剩餘比例。
+    // theta(Fo) = 6/pi^2 sum[n=1..inf] exp(-n^2 pi^2 Fo)/n^2。
+    // 它只需要時間（Fourier number），不需要在每個床層 cell 裡再切徑向網格。
+    // 對水平投影面積 dA = 2 pi r dr 做中點積分。
+    // Gagné 的圓錐推導可寫成一系列不同 r 的垂直 Darcy 流柱；這裡保留積分形式，
+    // 方便之後替換為實測的 beta、a_open，或讓貼壁比例隨高度改變。
+    function integrateRadialDischarge(rMin, rMax, superficialVelocityAtRadius) {
+        if (rMax <= rMin) return 0;
+        const dr = (rMax - rMin) / HYDRAULIC_RADIAL_STEPS;
+        let discharge = 0;
+        for (let step = 0; step < HYDRAULIC_RADIAL_STEPS; step++) {
+            const radius = rMin + (step + 0.5) * dr;
+            discharge += superficialVelocityAtRadius(radius)
+                * 2.0 * Math.PI * radius * dr;
+        }
+        return discharge;
+    }
+
+    function coneVolumeToHeight(height) {
+        return Math.PI * CONE_SLOPE * CONE_SLOPE
+            * Math.pow(Math.max(0, height), 3) / 3.0;
+    }
+
+    function freeWaterVolume(pondingHeight, bedHeight) {
+        const totalHeight = bedHeight + Math.max(0, pondingHeight);
+        return Math.max(0,
+            coneVolumeToHeight(totalHeight) - coneVolumeToHeight(bedHeight));
+    }
+
+    function pondingHeightFromVolume(volume, bedHeight) {
+        const heightCubed = Math.pow(bedHeight, 3)
+            + 3.0 * Math.max(0, volume)
+            / (Math.PI * CONE_SLOPE * CONE_SLOPE);
+        return Math.max(0, Math.cbrt(heightCubed) - bedHeight);
+    }
+
+    // Gagné 圓錐 Darcy 模型的數值積分版。
+    // 以 Kh = k g / nu 與 Gf = beta g / nu 改寫原式後：
+    // dQ = h(r) dA / [ell(r)/Kh + 1/Gf]。
+    // 底孔內是 core；底孔外到粉床頂半徑仍穿過咖啡；再向外才是純濾紙旁通。
+    function gagneConeDischarge(pondingHeight, geometry, bedHydraulicConductivity) {
+        const bedHeight = geometry.bedHeight;
+        const totalWaterHeight = bedHeight + Math.max(0, pondingHeight);
+        const bedRadius = bedHeight * CONE_SLOPE;
+        const waterRadius = totalWaterHeight * CONE_SLOPE;
+        const coreRadius = Math.min(V60_OUTLET_RADIUS_CM, bedRadius);
+        const Kh = Math.max(bedHydraulicConductivity, 1e-12);
+        const Gf = Math.max(FILTER_HEAD_CONDUCTANCE, 1e-12);
+
+        const coffeeFilterVelocity = radius => {
+            const coffeePath = Math.max(0, bedHeight - radius / CONE_SLOPE);
+            const localHead = Math.max(0, totalWaterHeight - radius / CONE_SLOPE);
+            const areaSpecificResistance = coffeePath / Kh + 1.0 / Gf;
+            return localHead / Math.max(areaSpecificResistance, 1e-12);
+        };
+
+        const qCore = integrateRadialDischarge(
+            0, coreRadius, coffeeFilterVelocity
+        );
+        const qSideCoffeeMax = integrateRadialDischarge(
+            coreRadius, bedRadius, coffeeFilterVelocity
+        );
+        const qFilterOnlyMax = integrateRadialDischarge(
+            bedRadius,
+            waterRadius,
+            radius => Gf * Math.max(0, totalWaterHeight - radius / CONE_SLOPE)
+        );
+
+        const qSideCoffee = A_OPEN * qSideCoffeeMax;
+        const qBypass = A_OPEN * qFilterOnlyMax;
+        return {
+            qBed: qCore + qSideCoffee,
+            qBypass,
+            qCore,
+            qSideCoffee,
+            qFilterOnlyMax,
+            coffeeFilterVelocity,
+            coreRadius,
+            totalWaterHeight,
+            bedRadius,
+            waterRadius
+        };
+    }
+
+    function getBedGeometry(dose) {
+        // 以預浸後 20 g = 5.0 cm 為暫定基準，並假設不同粉量維持相似圓錐。
+        // 線性尺度 ∝ dose^(1/3)，因此圓錐體積 ∝ L^3 ∝ dose。
+        const volumeScale = dose / BASE_DOSE;
+        const linearScale = Math.cbrt(volumeScale);
+        const bedHeight = BASE_BED_HEIGHT * linearScale;
+        const bedRadius = bedHeight * CONE_SLOPE;
+        const flowArea = Math.PI * bedRadius * bedRadius;
+        const cellArea = flowArea / COLS;
+        const bedConeVolume = coneVolumeToHeight(bedHeight);
+        return { bedHeight, bedRadius, flowArea, cellArea, bedConeVolume };
+    }
+
+
+    // Discrete streamfunction on dual plaquettes: sum of closed oriented cycles.
+    // Every cycle has exactly zero nodal divergence; no flow crosses the bed boundary.
+    // Effective network geometry only: NOT a resolved axisymmetric momentum solution.
+    function buildConservativeCirculation(depth,targetFlow,geometry){
+        const n=COLS*ROWS, signed=new Map(),vx=new Float64Array(n),vz=new Float64Array(n);
+        const posX=new Float64Array(n),posZ=new Float64Array(n),volume=new Float64Array(n);
+        for(let y=0;y<ROWS;y++){
+            const row=[];for(let x=0;x<COLS;x++)if(VALID_MASK[idx(x,y)])row.push(idx(x,y));
+            const radius=geometry.bedRadius*(1-(y+.5)/ROWS);
+            row.forEach((i,k)=>{posX[i]=-radius+2*radius*(k+.5)/row.length;posZ[i]=(y+.5)*geometry.bedHeight/ROWS;volume[i]=liquidWaterMassPerCell*cellVolumeWeights[i]/POROSITY;});
+        }
+        const add=(a,b,q)=>{const lo=Math.min(a,b),hi=Math.max(a,b),key=lo*n+hi;signed.set(key,(signed.get(key)||0)+(a===lo?q:-q));};
+        if(depth>=2&&targetFlow>0){
+            for(let y=0;y<ROWS-1;y++)for(let x=0;x<COLS-1;x++){
+                const a=idx(x,y),b=a+1,c=b+COLS,d=a+COLS;
+                if(![a,b,c,d].every(i=>VALID_MASK[i]))continue;
+                const z=(y+1)/depth;
+                const halfWidth=impactHalfWidth(y+1,depth);
+                const r=(x+.5-(COLS-1)/2)/Math.max(halfWidth,1);
+                if(z<=0||z>=1||Math.abs(r)>=1)continue;
+                // Odd mirrored lobes: center down, outer up, closure along top/bottom.
+                const radial=Number(FIXED.impactWidth)===0?Math.pow(1-r*r,2):Math.pow(impactRadialWeight(r,1),2);
+                const psi=-r*radial*16*z*z*(1-z)*(1-z);
+                add(a,b,psi);add(b,c,psi);add(c,d,psi);add(d,a,psi);
+            }
+        }
+        const raw=[];const downByRow=new Float64Array(ROWS);
+        for(const [key,q] of signed){if(Math.abs(q)<1e-16)continue;const a=Math.floor(key/n),b=key%n;raw.push({a,b,q});if(b-a===COLS&&q>0)downByRow[Math.floor(a/COLS)]+=q;}
+        const peak=Math.max(...downByRow),factor=peak>0?targetFlow/peak:0;
+        const divergence=new Float64Array(n);
+        const edges=raw.map(e=>{
+            const q=e.q*factor;divergence[e.a]+=q;divergence[e.b]-=q;
+            const dx=posX[e.b]-posX[e.a],dz=posZ[e.b]-posZ[e.a];
+            for(const i of [e.a,e.b]){vx[i]+=q*dx/(2*volume[i]);vz[i]+=q*dz/(2*volume[i]);}
+            return {from:q>=0?e.a:e.b,to:q>=0?e.b:e.a,q:Math.abs(q)};
+        });
+        return {edges,vx,vz,flow:peak>0?targetFlow:0,maxDivergence:Math.max(...divergence.map(Math.abs))};
+    }
+
+    // Merge opposite face flows BEFORE advection. Fresh top inflow has zero solute.
+    function advectWithCirculation(grids,qGrid,links,circulation,duration){
+        const n=COLS*ROWS,pairs=new Map(),outlets=[];
+        const add=(a,b,q)=>{if(b<0){outlets.push({from:a,to:-1,q});return;}const lo=Math.min(a,b),hi=Math.max(a,b),key=lo*n+hi;pairs.set(key,(pairs.get(key)||0)+(a===lo?q:-q));};
+        for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)for(const link of links[y][x])add(idx(x,y),link.destination,qGrid[y][x]*link.fraction);
+        for(const e of circulation)add(e.from,e.to,e.q);
+        const edges=[...outlets];for(const [key,q] of pairs){if(Math.abs(q)<1e-18)continue;const a=Math.floor(key/n),b=key%n;edges.push({from:q>0?a:b,to:q>0?b:a,q:Math.abs(q)});}
+        const outflow=new Float64Array(n);for(const e of edges)outflow[e.from]+=e.q;
+        let maxCourant=0;for(let i=0;i<n;i++)if(VALID_MASK[i])maxCourant=Math.max(maxCourant,outflow[i]*duration/(liquidWaterMassPerCell*cellVolumeWeights[i]));
+        const substeps=duration>0?Math.max(1,Math.ceil(maxCourant/MAX_ADVECTION_COURANT)):0,dt=duration/Math.max(1,substeps);
+        const cupByClass=grids.map(()=>0);let current=grids;
+        for(let step=0;step<substeps;step++){
+            const next=current.map(g=>g.slice());
+            for(const e of edges){const fraction=e.q*dt/(liquidWaterMassPerCell*cellVolumeWeights[e.from]);
+                for(let p=0;p<grids.length;p++){const dm=current[p][e.from]*fraction;next[p][e.from]-=dm;if(e.to<0)cupByClass[p]+=dm;else next[p][e.to]+=dm;}
+            }current=next;
+        }
+        return {grids:current,cupByClass,substeps,maxCourant};
+    }
+
+    function simulateModel(mode) {
+        const wetTau=Number(FIXED.wetTau||15);
+        const diffMultiplier=Number(FIXED.diffMultiplier||1);
+        const khCalibration=Number(FIXED.khCalibration||1);
+        const transportMode=FIXED.transportMode||'D';
+        const gamma=Number(FIXED.circulationGamma||'1');
+        const contactGain=Number(FIXED.contactGain||'8');
+        const contactBase=Number(FIXED.contactBase||'0.5');
+        const moveCirculation=transportMode==='B'||transportMode==='D';
+        const filmCirculation=transportMode==='C'||transportMode==='D';
+        const pools=mode==='single'?[{label:'單池',fraction:1,diffusivity:INTERNAL_DIFFUSIVITY_CM2_S}]:THREE_POOLS;
+        const channels=pools.flatMap((pool,poolIndex)=>[0,1].map(sizeIndex=>({pool,poolIndex,sizeIndex})));
+        const aggregateSizes=grids=>[0,1].map(size=>{
+            const out=new Float64Array(COLS*ROWS);
+            channels.forEach((c,j)=>{if(c.sizeIndex===size)for(let i=0;i<out.length;i++)out[i]+=grids[j][i];});return out;
+        });
+        const poolCup=pools.map(()=>0);
+        const current_q_in = parseFloat(FIXED.pourPreset);
+        const grindKey = document.getElementById('grindPreset').value;
+        const psd = GAGNE_PSD[grindKey];
+        const hydraulicDiameter = psd.bedD32;
+        const hydraulicScale = hydraulicDiameter / REFERENCE_HYDRAULIC_DIAMETER_UM;
+        doseGrams = 22;
+        const geometry = getBedGeometry(doseGrams);
+
+        activeParticleClasses = [
+            {
+                key: 'small', label: '細粉族群（<100 µm）',
+                diameterAreaUm: psd.fine.dArea,
+                diameterDiffusionUm: psd.fine.dDiff,
+                fraction: psd.fineFraction, color: '#ff9800'
+            },
+            {
+                key: 'main', label: '粗粉族群（≥100 µm）',
+                diameterAreaUm: psd.coarse.dArea,
+                diameterDiffusionUm: psd.coarse.dDiff,
+                fraction: 1.0 - psd.fineFraction, color: '#4caf50'
+            }
+        ].map(particleClass => ({
+            ...particleClass,
+            areaSizeRatio: particleClass.diameterAreaUm / REFERENCE_AREA_DIAMETER_UM,
+            diffusionSizeRatio:
+                particleClass.diameterDiffusionUm / REFERENCE_DIFFUSION_DIAMETER_UM
+        }));
+
+
+
+        const pourDuration = 140;
+
+
+        const ratio = TARGET_VOLUME / doseGrams;
+
+        // --- 先依實際粉重及 PSD 分配總可溶量，再按化學比例分池 ---
+        const totalSolubleMass = doseGrams * EY_MAX_FRACTION;   // g，理論上限可溶出總量
+        const perCellSoluble = totalSolubleMass / VALID_CELLS;  // 平均分配到每個粉層格子
+        soluteCellMaxByClass = activeParticleClasses.map(
+            particleClass => perCellSoluble * particleClass.fraction
+        );
+        soluteMaxByClass = soluteCellMaxByClass.map(value => value * VALID_CELLS);
+        soluteMaxMassTotal = soluteMaxByClass.reduce((sum, value) => sum + value, 0);
+
+        soluteGrids = channels.map(() => new Float64Array(COLS * ROWS));
+        liquidSoluteGrids = channels.map(
+            () => new Float64Array(COLS * ROWS)
+        );
+        // 幾何初始化供分散面積計算；時間迴圈中水量改由零開始累積。
+        // 等效儲水含可交換滯水，不是幾何孔隙體積的直接測量。
+        liquidWaterMassPerCell =
+            POROSITY * geometry.bedConeVolume * WATER_DENSITY / VALID_CELLS;
+        cellVolumeWeights=new Float64Array(COLS*ROWS);
+        for(let y=0;y<ROWS;y++){
+            const cells=[];for(let x=0;x<COLS;x++)if(VALID_MASK[idx(x,y)])cells.push(x);
+            const fraction=Math.pow(1-y/ROWS,3)-Math.pow(1-(y+1)/ROWS,3);
+            for(const x of cells)cellVolumeWeights[idx(x,y)]=fraction*VALID_CELLS/cells.length;
+        }
+        wetAgeStepGrid = new Uint16Array(COLS * ROWS);
+        for (let i = 0; i < COLS * ROWS; i++) {
+            if (VALID_MASK[i]) {
+                for (let classIndex = 0; classIndex < channels.length; classIndex++) {
+                    const c=channels[classIndex];
+                    soluteGrids[classIndex][i] = c.pool.fraction*soluteCellMaxByClass[c.sizeIndex]*cellVolumeWeights[i];
+                }
+            }
+        }
+
+        history = [];
+        buildDispersionFaces(geometry);
+
+        // Linear-driving-force internal approximation: k_s=15 D_eff/R_diff^2.
+        // A=6 Vparticle/d32, Gint=k_s Mmax/Ceq0, Gext=A kfilm, G in cm^3/s.
+        const particleModels = activeParticleClasses.map((p,j)=>({
+            ...p, d_p:p.diameterAreaUm*1e-4,
+            surfaceArea:6*(1-POROSITY)*geometry.bedConeVolume/VALID_CELLS*p.fraction/(p.diameterAreaUm*1e-4),
+            internalRate:15*INTERNAL_DIFFUSIVITY_CM2_S/Math.pow(p.diameterDiffusionUm*1e-4/2,2)
+        }));
+
+        let accSoluteCup = 0;
+        const accSoluteCupByClass = activeParticleClasses.map(() => 0);
+        let accWaterBed = 0, accWaterBypass = 0;
+        let h = 0.0;
+        // Effective liquid storage, inferred conditionally from water+solute mass balance.
+        // Not a direct porosity or retention measurement; no evaporation in this scenario.
+        const storageCapacity=(374-319.9+319.9*.0143)*doseGrams/22;
+        let storedWater=0,accInputWater=0;
+        const pourSegments=[{a:0,b:12,m:77},{a:42,b:68,m:123},{a:105,b:140,m:174}];
+
+        for (let timeIndex = 0; timeIndex <= Math.round(TOTAL_TIME / DT); timeIndex++) {
+            const t = timeIndex * DT;
+            // t 為步末；與三個注水時間窗取精確重疊，累積注水恰為 374 g。
+            // t=0 只記錄初始狀態，不先偷跑一個 DT 的固液交換。
+            const stepDuration = t > 0 ? DT : 0;
+            const stepStart = Math.max(0, t - DT);
+            const stepInput=pourSegments.reduce((sum,p)=>sum+p.m/(p.b-p.a)*Math.max(0,Math.min(t,p.b)-Math.max(stepStart,p.a)),0);
+            accInputWater+=stepInput;
+            const fill=Math.min(Math.max(0,storageCapacity-storedWater),stepInput);
+            storedWater+=fill;
+            liquidWaterMassPerCell=Math.max(storedWater,1e-8)/VALID_CELLS;
+            const wettedFraction=(storedWater/storageCapacity)*(1-Math.exp(-t/wetTau));
+            let isPouring=stepInput>0;
+            let q_in=(stepInput-fill)/DT;
+            const jetInput=stepInput/DT;
+
+            // PSD 的 d32 先以 Kozeny-Carman 型平方律設定 Kh 的相對值；
+            // 總床流與純旁通則交給 Gagné 的圓錐徑向 Darcy 積分。
+            // Beta 中央擾動僅影響交換，不改變 Darcy 穿流。
+            const bedHydraulicConductivity =
+                khCalibration * (hydraulicScale * hydraulicScale);
+            const hydraulicFlow = gagneConeDischarge(
+                h, geometry, bedHydraulicConductivity
+            );
+            let q_bed_current = Math.max(0, hydraulicFlow.qBed);
+            let q_bypass_current = Math.max(0, hydraulicFlow.qBypass);
+
+            // 使用圓錐殼層的精確自由水體積；一個時間步不能排出超過
+            // 「步初積水 + 本步注水」的水。必要時同比例縮放床流與旁通。
+            const freeWaterAtStepStart = freeWaterVolume(h, geometry.bedHeight);
+            const availableDrainRate = (freeWaterAtStepStart + q_in * DT) / DT;
+            const potentialDrainRate = q_bed_current + q_bypass_current;
+            let hydraulicDrainScale = 1.0;
+            if (potentialDrainRate > availableDrainRate && potentialDrainRate > 0) {
+                const drainScale = availableDrainRate / potentialDrainRate;
+                hydraulicDrainScale = drainScale;
+                q_bed_current *= drainScale;
+                q_bypass_current *= drainScale;
+            }
+
+            const q_out_top_bed = q_bed_current;
+            let stepWaterFlowBottom = 0;
+
+            // 流速依賴的 Beta 擾動場：不重分配每層既有 Q_y，
+            // 完整場速率稍後進入 Re → Sh → k_ext。正規化確保不憑空增加水量。
+            const jetVelocity = isPouring ? jetInput / JET_AREA_CM2 : 0;
+            const current_y_max = impactDepthRowsFromJetSpeed(
+                isPouring ? jetInput : 0,
+                hydraulicScale
+            );
+            const betaField = buildBetaRecirculationField(current_y_max);
+            const meanPourSuperficialVelocity = isPouring
+                ? q_in / Math.max(geometry.flowArea, 1e-12)
+                : 0;
+            const recirculationVelocityScale =
+                BETA_RECIRCULATION_STRENGTH * meanPourSuperficialVelocity;
+            let v_grid = [];
+            let q_grid = [];
+            // Same independent vertical Darcy stream-tubes as the discharge integral.
+            // Q(z) declines as streams leave the cone wall; this is not a 2-D pressure solve.
+            const rowDarcyFlows=[];
+            for (let y=0;y<ROWS;y++) {
+                v_grid[y]=new Float32Array(COLS);q_grid[y]=new Float64Array(COLS);
+                const radius=geometry.bedRadius*(1-y/ROWS);
+                const core=Math.min(radius,hydraulicFlow.coreRadius);
+                const qRow=(integrateRadialDischarge(0,core,hydraulicFlow.coffeeFilterVelocity)
+                    +A_OPEN*integrateRadialDischarge(core,radius,hydraulicFlow.coffeeFilterVelocity))*hydraulicDrainScale;
+                rowDarcyFlows.push(qRow);
+                const cells=[];for(let x=0;x<COLS;x++)if(VALID_MASK[idx(x,y)])cells.push(x);
+                const area=Math.PI*radius*radius;
+                for(const x of cells){q_grid[y][x]=qRow/cells.length;v_grid[y][x]=qRow/Math.max(area,1e-12);}
+            }
+
+            // 這張 map 與介面質傳使用完全相同的局部孔隙流速：
+            // 垂直 Darcy 分量與 Beta 擾動速度取向量大小，再除以孔隙率。
+            const circulation=buildConservativeCirculation(current_y_max,isPouring?gamma*jetInput:0,geometry);
+            const envelope=new Float32Array(COLS*ROWS),contact=new Float32Array(COLS*ROWS);
+            for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+                const i=idx(x,y);if(!VALID_MASK[i])continue;
+                const z=y+.5,h=current_y_max,w=impactHalfWidth(z,h),r=x-(COLS-1)/2;
+                const active=isPouring&&transportMode!=='A'&&transportMode!=='legacy'&&h>=2&&w>0&&z<h&&Math.abs(r)<w;
+                const oldWidth=Number(FIXED.impactWidth)===0;
+                const radial=active?(oldWidth?Math.pow(1-(r/w)**2,2):impactRadialWeight(r,w)):0;
+                const vertical=active?Math.min(1,gamma)*Math.pow(1-(z/h)**2,2):0;
+                envelope[i]=radial*vertical;
+                const enhancement=oldWidth?1-Math.pow(1-envelope[i],contactGain):radial*(1-Math.pow(1-vertical,contactGain));
+                contact[i]=transportMode==='legacy'?1:contactBase+(1-contactBase)*enhancement;
+            }
+            const flowSpeedMap = new Float32Array(COLS * ROWS);
+            const transportSpeedMap=new Float32Array(COLS*ROWS);
+            let maxFlowSpeed = 0;
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    const i = idx(x, y);
+                    if (!VALID_MASK[i]) continue;
+                    const localRecirculationVelocity =
+                        betaField.speed[y][x] * recirculationVelocityScale;
+                    const combinedSpeed=Math.hypot(circulation.vx[i],v_grid[y][x]+circulation.vz[i])/POROSITY;
+                    transportSpeedMap[i]=moveCirculation?combinedSpeed:v_grid[y][x]/POROSITY;
+                    const vInterstitial=transportMode==='legacy'?Math.hypot(v_grid[y][x],localRecirculationVelocity)/POROSITY
+                        :filmCirculation?combinedSpeed:v_grid[y][x]/POROSITY;
+                    flowSpeedMap[i] = vInterstitial;
+                    maxFlowSpeed = Math.max(maxFlowSpeed, vInterstitial);
+                }
+            }
+
+            const freeWaterAtStepEnd = Math.max(0,
+                freeWaterAtStepStart
+                + (q_in - q_out_top_bed - q_bypass_current) * DT
+            );
+            h = pondingHeightFromVolume(freeWaterAtStepEnd, geometry.bedHeight);
+
+            let phase=t<42?'簡化悶蒸':isPouring?'正式注水':t<140?'段間等待':h>0.001?'滴濾中':'滴濾完成';
+
+            // ---------- A. 固相 → 每格持久液相（隱式耗減與共同液相耦合） ----------
+            // C_eq 決定傳質方向與驅動力；K_overall 決定接近平衡的速度。
+            // 同時求解新固相殘量與新液相濃度；暫採單向溶出，不模擬再吸附。
+            if (stepDuration > 0) {
+                for (let y = 0; y < ROWS; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        const i = idx(x, y);
+                        if (!VALID_MASK[i]) continue;
+
+                        const weight=cellVolumeWeights[i];
+                        const W=liquidWaterMassPerCell*weight;
+                        for(let pIndex=0;pIndex<pools.length;pIndex++){
+                        const pool=pools[pIndex], offset=pIndex*2;
+                        const L0=liquidSoluteGrids[offset][i]+liquidSoluteGrids[offset+1][i];
+                        const C0=L0/W;
+                        const Sc=KINEMATIC_VISCOSITY/MASS_DIFFUSIVITY;
+                        const terms=particleModels.map((p,j)=>{
+                            const Re=flowSpeedMap[i]*p.d_p/KINEMATIC_VISCOSITY;
+                            const Sh=SH_BASE+SH_FLOW_COEFF*Math.pow(Re,SH_RE_EXPONENT)*Math.pow(Sc,SH_SC_EXPONENT);
+                            const kext=EXTERNAL_TRANSFER_FACTOR*Sh*MASS_DIFFUSIVITY/p.d_p;
+                            const Gext=p.surfaceArea*weight*kext;
+                            const rate=15*pool.diffusivity*diffMultiplier/Math.pow(p.diameterDiffusionUm*1e-4/2,2);
+                            const Gint=rate*soluteCellMaxByClass[j]*weight/C_SAT_SINGLE;
+                            const G=wettedFraction*contact[i]*Gext*Gint/Math.max(Gext+Gint,1e-30);
+                            const b=C_SAT_SINGLE/(soluteCellMaxByClass[j]*weight);
+                            const m=soluteGrids[offset+j][i];
+                            return {j:offset+j,m,b,a:stepDuration*G/(1+stepDuration*G*b)};
+                        });
+                        // Backward-Euler coupled finite reservoirs, one-way dissolution.
+                        // dm_i=a_i max(b_i*m_i-Cnew,0), W*Cnew=L0+sum(dm_i).
+                        // Active-set solve updates depletion AND liquid concentration together.
+                        let active=terms.filter(p=>p.b*p.m>C0), Cnew=C0;
+                        for(let n=0;n<3;n++){
+                            Cnew=(L0+active.reduce((a,p)=>a+p.a*p.b*p.m,0))/(W+active.reduce((a,p)=>a+p.a,0));
+                            const next=active.filter(p=>p.b*p.m>Cnew);
+                            if(next.length===active.length)break;active=next;
+                        }
+                        for(const p of active){
+                            const dm=p.a*Math.max(0,p.b*p.m-Cnew);
+                            soluteGrids[p.j][i]-=dm;liquidSoluteGrids[p.j][i]+=dm;
+                        }
+
+                        } // chemical pool: each sees its own liquid concentration
+                        // 接觸記錄與全域有效潤濕比例分開，無穿流時仍可固液交換。
+                        if (wetAgeStepGrid[i] < 65535) wetAgeStepGrid[i]++;
+                    }
+                }
+            }
+
+            // ---------- B. 液相有限體積平流：舊 map → temporary map ----------
+            const flowLinks = buildVerticalFlowLinks(q_grid);
+            const advection = transportMode==='legacy'
+                ?advectLiquidSolute(liquidSoluteGrids,q_grid,flowLinks,stepDuration)
+                :advectWithCirculation(liquidSoluteGrids,q_grid,flowLinks,moveCirculation?circulation.edges:[],stepDuration);
+            liquidSoluteGrids = disperseLiquidSolute(advection.grids,stepDuration);
+            const stepSoluteCupByClass=[0,0];
+            channels.forEach((c,j)=>{stepSoluteCupByClass[c.sizeIndex]+=advection.cupByClass[j];poolCup[c.poolIndex]+=advection.cupByClass[j];});
+            const stepSoluteCup = stepSoluteCupByClass.reduce(
+                (sum, mass) => sum + mass,
+                0
+            );
+
+            // 水流使用同一組邊界連結；所有碰到側壁或底部的 q 都計入出杯。
+            let outletFlowRate = 0;
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    if (q_grid[y][x] <= 0) continue;
+                    const outletFraction = flowLinks[y][x].reduce(
+                        (sum, link) => sum + (link.destination < 0 ? link.fraction : 0),
+                        0
+                    );
+                    outletFlowRate += q_grid[y][x] * outletFraction;
+                }
+            }
+            stepWaterFlowBottom =
+                outletFlowRate * stepDuration * WATER_DENSITY;
+
+            accSoluteCup += stepSoluteCup;
+            for (let classIndex = 0; classIndex < activeParticleClasses.length; classIndex++) {
+                accSoluteCupByClass[classIndex] += stepSoluteCupByClass[classIndex];
+            }
+            accWaterBed += stepWaterFlowBottom;
+            accWaterBypass += q_bypass_current * stepDuration;
+            let totalAccumulatedWater = accWaterBed + accWaterBypass;
+
+            // --- EY／TDS 直接用「克」做質量平衡計算，不再需要舊版的魔術數字 ---
+            const totalEY = (accSoluteCup / doseGrams) * 100;
+
+            const totalDissolvedGrams = accSoluteCup;
+            // 下壺液體質量 = 流出的水 + 溶出的固形物（質量守恆，取代舊版的 *15/0.8 magic number）
+            let beverageMass = totalAccumulatedWater + totalDissolvedGrams;
+            let currentTDS = beverageMass > 0 ? (totalDissolvedGrams / beverageMass) * 100 : 0;
+            let currentBypassRatio = totalAccumulatedWater > 0 ? (accWaterBypass / totalAccumulatedWater) * 100 : 0;
+
+            const sizeSolid=aggregateSizes(soluteGrids),sizeLiquid=aggregateSizes(liquidSoluteGrids);
+            const remainingSolidByClass = sizeSolid.map(sumGrid);
+            const poolStats=pools.map((p,k)=>{
+                const initial=totalSolubleMass*p.fraction;
+                const solid=sumGrid(soluteGrids[2*k])+sumGrid(soluteGrids[2*k+1]);
+                const liquid=sumGrid(liquidSoluteGrids[2*k])+sumGrid(liquidSoluteGrids[2*k+1]);
+                return {label:p.label,initial,solid,liquid,cup:poolCup[k],releasedPercent:100*(initial-solid)/initial,cupEY:100*poolCup[k]/doseGrams,error:initial-solid-liquid-poolCup[k]};
+            });
+            const releasedSolidByClass = remainingSolidByClass.map(
+                (remaining, classIndex) => {
+                    const released =
+                        soluteMaxByClass[classIndex] - remaining;
+                    return Math.abs(released) < 1e-12
+                        ? 0
+                        : Math.max(0, released);
+                }
+            );
+            const classRatios = releasedSolidByClass.map(
+                (mass, classIndex) => (mass / soluteMaxByClass[classIndex]) * 100
+            );
+            const totalReleasedSolid = releasedSolidByClass.reduce(
+                (sum, mass) => sum + mass,
+                0
+            );
+            const totalRatio = (totalReleasedSolid / soluteMaxMassTotal) * 100;
+            const retainedLiquidMass = liquidSoluteGrids.reduce(
+                (sum, grid) => sum + sumGrid(grid),
+                0
+            );
+            const soluteMassBalanceError =
+                soluteMaxMassTotal
+                - (
+                    remainingSolidByClass.reduce((sum, mass) => sum + mass, 0)
+                    + retainedLiquidMass
+                    + accSoluteCup
+                );
+            const stepCupWater =
+                stepWaterFlowBottom + q_bypass_current * stepDuration;
+            const instantTds = stepCupWater + stepSoluteCup > 0
+                ? (stepSoluteCup / (stepCupWater + stepSoluteCup)) * 100
+                : 0;
+            const releaseRateMgS =
+                stepDuration > 0 ? (stepSoluteCup / stepDuration) * 1000 : 0;
+            const flowBalanceError =
+                q_bed_current * stepDuration * WATER_DENSITY
+                - stepWaterFlowBottom;
+
+            // .slice() 是原生記憶體複製，取代舊版 JSON.parse(JSON.stringify(grid))，
+            // 在相同資料量下快非常多，且不會產生大量暫時性物件造成 GC 壓力。
+            history.push({
+                time: t, wettedFraction, storedWater, accInputWater, beverageMass, waterMassBalanceError:accInputWater-storedWater-freeWaterAtStepEnd-totalAccumulatedWater,
+                soluteByClass: sizeSolid,
+                solidByPool: pools.map((p,k)=>Float64Array.from(soluteGrids[2*k],(v,i)=>v+soluteGrids[2*k+1][i])),
+                liquidByClass: sizeLiquid, modelMode:mode, poolStats,
+                envelope,contact,contactBase,recircX:Float32Array.from(circulation.vx,v=>v/POROSITY),recircZ:Float32Array.from(circulation.vz,v=>v/POROSITY),
+                flowSpeed: flowSpeedMap, transportSpeed:transportSpeedMap, transportMode,gamma,
+                circulationFlow:moveCirculation?circulation.flow:0,circulationDivergence:circulation.maxDivergence,
+                darcySpeed: Float32Array.from(VALID_MASK,(_,i)=>v_grid[Math.floor(i/COLS)][i%COLS]/POROSITY),
+                maxFlowSpeed,
+                totalEY, tds: currentTDS, instantTds, releaseRateMgS,
+                totalRatio, classRatios, waterLevel: h, phase, current_y_max,
+                jetVelocity,
+                maxRecirculationVelocity: recirculationVelocityScale,
+                bypassRatio: currentBypassRatio, bedHeight: geometry.bedHeight,
+                flowArea: geometry.flowArea, qBed: q_bed_current,
+                qBedCore: hydraulicFlow.qCore * hydraulicDrainScale,
+                qBedSide: hydraulicFlow.qSideCoffee * hydraulicDrainScale,
+                rowDarcyFlows,
+                qBypass: q_bypass_current,
+                filterBeta: FILTER_BETA_MDPERUM, aOpen: A_OPEN,
+                accumulatedWaterBed: accWaterBed,
+                accumulatedWaterBypass: accWaterBypass,
+                freeWaterVolume: freeWaterAtStepEnd,
+                flowBalanceError, soluteMassBalanceError,
+                retainedLiquidMass,
+                liquidWaterMassPerCell,
+                cellVolumeWeights,
+                advectionSubsteps: advection.substeps,
+                maxCourant: advection.maxCourant,
+                accumulatedByClass: accSoluteCupByClass.slice(),
+                grindKey, hydraulicScale, bedHydraulicConductivity
+            });
+        }
+        return history;
+    }
+
+    function initSimulation(){
+        threeHistory=simulateModel('three');
+        history=threeHistory;
+        const completedState=history.find(state=>state.phase==='滴濾完成');
+        document.getElementById('finishTimeLabel').innerText = completedState
+            ? `滴濾完成：${(BLOOM_TIME + completedState.time).toFixed(1)} s`
+            : `滴濾完成：${DISPLAY_END_TIME} s 內尚未完成`;
+        setupChart();
+        updateVisuals(0);
+    }
+
+    function getCellColor(state, x, y, mode) {
+        const i = idx(x, y);
+        if (!VALID_MASK[i]) return '#1e1e1e';
+        if(mode==='envelope'||mode==='contact'){
+            const v=mode==='envelope'?state.envelope[i]:state.contact[i];return 'rgb('+Math.round(20+230*v)+','+Math.round(45+160*v)+','+Math.round(100-60*v)+')';
+        }
+        if (mode === 'flow' || mode === 'darcy' || mode === 'transport') {
+            const normalized = (mode==='darcy'?state.darcySpeed[i]:mode==='transport'?state.transportSpeed[i]:state.flowSpeed[i]) / FLOW_HEATMAP_MAX_CM_S;
+            const ratio = Math.sqrt(Math.max(0, Math.min(1, normalized)));
+            if (ratio <= 0.5) {
+                const t = ratio * 2;
+                const r = Math.round(8 + t * (0 - 8));
+                const g = Math.round(31 + t * (188 - 31));
+                const b = Math.round(54 + t * (212 - 54));
+                return `rgb(${r},${g},${b})`;
+            }
+            const t = (ratio - 0.5) * 2;
+            const r = Math.round(t * 255);
+            const g = Math.round(188 + t * (235 - 188));
+            const b = Math.round(212 + t * (59 - 212));
+            return `rgb(${r},${g},${b})`;
+        }
+        if (mode === 'liquid') {
+            const liquidMass = state.liquidByClass.reduce(
+                (sum, grid) => sum + grid[i],
+                0
+            );
+            const concentration =
+                liquidMass / Math.max(state.liquidWaterMassPerCell*state.cellVolumeWeights[i], 1e-12);
+            const ratio = Math.max(
+                0,
+                Math.min(1, concentration / C_SAT_SINGLE)
+            );
+            const r = Math.floor(20 + ratio * 235);
+            const g = Math.floor(45 + ratio * 190);
+            const b = Math.floor(80 + ratio * 40);
+            return `rgb(${r},${g},${b})`;
+        }
+        let remainingMass;
+        let maximumMass;
+        if (/^pool[0-2]$/.test(mode)) {
+            const p=Number(mode.slice(4));
+            remainingMass=state.solidByPool[p][i];
+            maximumMass=soluteCellMaxByClass.reduce((sum,value)=>sum+value,0)*THREE_POOLS[p].fraction;
+        } else if (mode === 'small') {
+            remainingMass = state.soluteByClass[0][i];
+            maximumMass = soluteCellMaxByClass[0];
+        } else if (mode === 'main') {
+            remainingMass = state.soluteByClass[1][i];
+            maximumMass = soluteCellMaxByClass[1];
+        } else {
+            remainingMass = state.soluteByClass.reduce((sum, grid) => sum + grid[i], 0);
+            maximumMass = soluteCellMaxByClass.reduce((sum, value) => sum + value, 0);
+        }
+        let ratio = remainingMass / (maximumMass*state.cellVolumeWeights[i]);
+        ratio = Math.max(0, Math.min(1, ratio));
+
+        const r = Math.floor(244 + ratio * (76 - 244));
+        const g = Math.floor(67 + ratio * (175 - 67));
+        const bl = Math.floor(54 + ratio * (80 - 54));
+        return `rgb(${r},${g},${bl})`;
+    }
+
+    function updateVisuals(stepIndex) {
+        if (stepIndex >= history.length) stepIndex = history.length - 1;
+        const state = history[stepIndex];
+        ['fast','mid','slow'].forEach((key,p)=>{
+            const value=state.poolStats[p].releasedPercent;
+            document.getElementById(key+'Release').innerText=value.toFixed(1)+'%';
+            document.getElementById(key+'Bar').style.width=Math.max(0,Math.min(100,value))+'%';
+        });
+        const mode = document.getElementById('heatmapMode').value;
+        const showingLiquid = mode === 'liquid';
+        const showingFlow = mode === 'flow' || mode === 'darcy' || mode === 'transport';
+        const visibleMaxFlow=mode==='darcy'?Math.max(...state.darcySpeed):mode==='transport'?Math.max(...state.transportSpeed):state.maxFlowSpeed;
+        document.getElementById('legendLow').innerText = showingFlow
+            ? '■ 0 cm/s'
+            : showingLiquid
+                ? '■ 深藍色（低濃度）'
+                : '■ 紅色（完全耗盡）';
+        document.getElementById('legendLow').style.color = showingFlow
+            ? '#081f36'
+            : showingLiquid ? '#145080' : '#f44336';
+        document.getElementById('legendHigh').innerText = showingFlow
+            ? visibleMaxFlow > 0
+                ? `■ ${FLOW_HEATMAP_MAX_CM_S.toFixed(1)} cm/s 色階上限（此刻最高 ${visibleMaxFlow.toFixed(3)} cm/s）`
+                : '■ 尚無床內水流'
+            : showingLiquid
+                ? '■ 黃色（高濃度）'
+                : '■ 綠色（尚未萃取）';
+        document.getElementById('legendHigh').style.color =
+            showingFlow || showingLiquid ? '#ffeb3b' : '#4caf50';
+
+        if(mode==='envelope'||mode==='contact'){
+            document.getElementById('legendLow').innerText='■ 0';document.getElementById('legendHigh').innerText='■ 1（此刻最高 '+Math.max(...(mode==='envelope'?state.envelope:state.contact)).toFixed(3)+'）';
+        }
+
+        const canvas = document.getElementById('bedCanvas');
+        const ctx = canvas.getContext('2d');
+        const compactBed=true;
+        const cellW = compactBed?Math.min(canvas.width/(2*TOP_RADIUS+2),canvas.height/ROWS):canvas.width/COLS;
+        const cellH = compactBed?cellW:canvas.height/ROWS;
+        const bedOffsetX=compactBed?(canvas.width-COLS*cellW)/2:0;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 畫布比例固定為 COLS:ROWS = 2:1，因此 cellW ≈ cellH。
+        // 直接繪製模擬用 VALID_MASK；不再疊加第二套「視覺錐體」，
+        // 避免兩個 mask 交集把錐角錯誤縮窄。
+        for (let x = 0; x < COLS; x++) {
+            for (let y = 0; y < ROWS; y++) {
+                ctx.fillStyle = getCellColor(state, x, y, mode);
+                ctx.fillRect(
+                    bedOffsetX + x * cellW,
+                    y * cellH,
+                    cellW + 0.5,
+                    cellH + 0.5
+                );
+            }
+        }
+
+        const displayTime = BLOOM_TIME + state.time;
+        document.getElementById('timeLabel').innerText = displayTime.toFixed(1);
+        document.getElementById('timeSlider').value = displayTime;
+
+        document.getElementById('waterLevelLabel').innerText = state.waterLevel.toFixed(2);
+        const pondScale=Math.max(1,...history.map(h=>h.waterLevel));
+        const pondFraction=Math.max(0,Math.min(1,state.waterLevel/pondScale));
+        const pondY=105-85*pondFraction, pondLeft=127-40*pondFraction, pondRight=473+40*pondFraction;
+        document.getElementById('pondHeightLabel').innerText=state.waterLevel.toFixed(2)+' cm';
+        document.getElementById('pondFill').setAttribute('d',`M127 105 L473 105 L${pondRight} ${pondY} L${pondLeft} ${pondY} Z`);
+        document.getElementById('pondSurface').setAttribute('d',`M${pondLeft} ${pondY} L${pondRight} ${pondY}`);
+        const stage=state.time<42?'悶蒸':state.time<68?'第一段注水':state.time<105?'段間等待':state.time<140?'第二段注水':state.phase==='滴濾完成'?'滴濾完成':'滴濾中';
+        const banner=document.getElementById('stageBanner');
+        banner.innerText=stage;
+        document.getElementById('recordStage').innerText=translateText(stage);
+        document.getElementById('recordClock').innerText=state.time.toFixed(1)+' s';
+        banner.style.borderColor=stage==='滴濾完成'?'#65c98b':stage.includes('注水')?'#4db8ff':'#e0ae67';
+        document.getElementById('phaseLabel').innerText = state.phase;
+
+        if (state.phase === "滴濾中") document.getElementById('phaseLabel').style.color = "#ff9800";
+        else if (state.phase === "滴濾完成") document.getElementById('phaseLabel').style.color = "#4caf50";
+        else document.getElementById('phaseLabel').style.color = "#ffeb3b";
+
+        document.getElementById('smallEyLabel').innerText = state.classRatios[0].toFixed(2);
+        // Freeze only the summary card; retain physical history and reversible time scrubbing.
+        const dripCompletedState = history.find(h => h.phase === '滴濾完成');
+        const mainSummaryFrozen = dripCompletedState && state.time >= dripCompletedState.time;
+        const mainSummaryState = mainSummaryFrozen ? dripCompletedState : state;
+        document.getElementById('mainEyLabel').innerText = mainSummaryState.classRatios[1].toFixed(2);
+        document.getElementById('mainEyCaption').innerText = mainSummaryFrozen
+            ? '粗粉完成度（滴濾完成時）' : '粗粉完成度';
+        document.getElementById('eyLabel').innerText = state.totalEY.toFixed(2);
+        document.getElementById('tdsLabel').innerText = state.tds.toFixed(2);
+
+        brewChart.data.labels = history.slice(0, stepIndex + 1)
+            .map(h => (BLOOM_TIME + h.time).toFixed(0));
+        brewChart.data.datasets[0].data = history.slice(0, stepIndex + 1).map(h => h.totalRatio);
+        brewChart.data.datasets[1].data = history.slice(0, stepIndex + 1).map(h => h.classRatios[0]);
+        brewChart.data.datasets[2].data = history.slice(0, stepIndex + 1).map(h => h.classRatios[1]);
+        brewChart.update('none');
+        poolChart.data.labels=brewChart.data.labels.slice();
+        poolChart.data.datasets.forEach((ds,p)=>{ds.data=history.slice(0,stepIndex+1).map(h=>h.poolStats[p].releasedPercent);});
+        poolChart.update('none');
+
+        diagnosticChart.data.labels = history.slice(0, stepIndex + 1)
+            .map(h => (BLOOM_TIME + h.time).toFixed(0));
+        diagnosticChart.data.datasets[0].data = history.slice(0, stepIndex + 1).map(h => h.releaseRateMgS);
+        diagnosticChart.data.datasets[1].data = history.slice(0, stepIndex + 1).map(h => h.instantTds);
+        diagnosticChart.update('none');
+        localizeDisplay();
+    }
+
+    let playbackFrame=0;
+    function loop() {
+        if (!isPlaying) return;
+        playbackFrame++;
+        if(playbackFrame%2===1){animationId=requestAnimationFrame(loop);return;}
+        let slider = document.getElementById('timeSlider');
+        let nextVal = parseFloat(slider.value) + DT;
+        if (nextVal > DISPLAY_END_TIME) { isPlaying = false; return; }
+
+        slider.value = nextVal;
+        updateVisuals(Math.floor((nextVal - BLOOM_TIME) / DT));
+        animationId = requestAnimationFrame(loop);
+    }
+
+    function setupChart() {
+        if (brewChart) brewChart.destroy();
+        if (diagnosticChart) diagnosticChart.destroy();
+        const ctx = document.getElementById('chartCanvas').getContext('2d');
+        brewChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: '總可溶物完成度', data: [], borderColor: '#eeeeee', borderWidth: 3, pointRadius: 0, tension: 0.1, yAxisID: 'y' },
+                    { label: '細粉族群（<100 µm）', data: [], borderColor: '#ff9800', borderWidth: 2, pointRadius: 0, tension: 0.1, yAxisID: 'y' },
+                    { label: '粗粉族群（≥100 µm）', data: [], borderColor: '#4caf50', borderWidth: 2, pointRadius: 0, tension: 0.1, borderDash: [6, 4], yAxisID: 'y' }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: { title: { display: true, text: '沖煮時間 (s)', color: '#aaa' }, ticks: { maxTicksLimit: 12, color: '#aaa' }, grid: { color: '#333' } },
+                    y: { type: 'linear', position: 'left', min: 0, max: 100, title: { display: true, text: '族群庫存釋放完成度 (%)', color: '#ccc', font: { size: 14 } }, ticks: { color: '#aaa' }, grid: { color: '#333' } }
+                },
+                animation: false,
+                plugins: { legend: { position: 'top', labels: { color: '#eee', font: { size: 14 } } } }
+            }
+        });
+
+        if(poolChart)poolChart.destroy();
+        poolChart=new Chart(document.getElementById('poolCanvas').getContext('2d'),{
+            type:'line',
+            data:{labels:[],datasets:['快池','中池','慢池'].map((label,p)=>({label,data:[],borderColor:['#ff9800','#4db8ff','#b388ff'][p],borderWidth:2,pointRadius:0,tension:0.1}))},
+            options:{responsive:true,maintainAspectRatio:false,animation:false,
+                scales:{x:{title:{display:true,text:'沖煮時間 (s)',color:'#aaa'},ticks:{maxTicksLimit:12,color:'#aaa'},grid:{color:'#333'}},y:{min:0,max:100,title:{display:true,text:'各池庫存釋放完成度 (%)',color:'#ccc'},ticks:{color:'#aaa'},grid:{color:'#333'}}},
+                plugins:{legend:{labels:{color:'#eee'}}}}
+        });
+        const diagnosticCtx = document.getElementById('diagnosticCanvas').getContext('2d');
+        diagnosticChart = new Chart(diagnosticCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: '下壺溶質速率 (mg/s)', data: [], borderColor: '#ffeb3b', borderWidth: 2, pointRadius: 0, tension: 0.08, yAxisID: 'rate' },
+                    { label: '瞬時出口 TDS (%)', data: [], borderColor: '#4db8ff', borderWidth: 2, pointRadius: 0, tension: 0.08, yAxisID: 'tds' }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: { title: { display: true, text: '沖煮時間 (s)', color: '#aaa' }, ticks: { maxTicksLimit: 12, color: '#aaa' }, grid: { color: '#333' } },
+                    rate: { type: 'linear', position: 'left', min: 0, title: { display: true, text: 'mg/s', color: '#ffeb3b' }, ticks: { color: '#aaa' }, grid: { color: '#333' } },
+                    tds: { type: 'linear', position: 'right', min: 0, title: { display: true, text: '瞬時 TDS (%)', color: '#4db8ff' }, ticks: { color: '#aaa' }, grid: { drawOnChartArea: false } }
+                },
+                animation: false,
+                plugins: { legend: { position: 'top', labels: { color: '#eee', font: { size: 13 } } } }
+            }
+        });
+    }
+
+    function resizeCanvas() {
+        const c1 = document.getElementById('bedCanvas');
+        document.querySelector('.pond-view svg').setAttribute('viewBox','110 0 380 110');
+        const dpr = window.devicePixelRatio || 1;
+
+        const cssWidth = c1.clientWidth;
+        const cssHeight = c1.clientHeight;
+
+        c1.width = Math.round(cssWidth * dpr);
+        c1.height = Math.round(cssHeight * dpr);
+
+        // 初次載入時 history 尚未建立，避免在 initSimulation 前讀取空狀態。
+        if (!history.length) return;
+
+        updateVisuals(
+            Math.floor(
+                (parseFloat(document.getElementById('timeSlider').value) - BLOOM_TIME) / DT
+            )
+        );
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+
+    document.getElementById('playBtn').addEventListener('click', () => {
+        isPlaying = !isPlaying;
+        if (isPlaying) loop();
+        else cancelAnimationFrame(animationId);
+    });
+
+    document.getElementById('timeSlider').addEventListener('input', (e) => {
+        isPlaying = false;
+        cancelAnimationFrame(animationId);
+        updateVisuals(
+            Math.floor((parseFloat(e.target.value) - BLOOM_TIME) / DT)
+        );
+    });
+
+    document.getElementById('heatmapMode').addEventListener('change', () => {
+        updateVisuals(Math.floor(
+            (parseFloat(document.getElementById('timeSlider').value) - BLOOM_TIME) / DT
+        ));
+    });
+
+
+    document.getElementById('grindPreset').addEventListener('change', () => {
+        isPlaying = false;
+        cancelAnimationFrame(animationId);
+        document.getElementById('timeSlider').value = BLOOM_TIME;
+        initSimulation();
+    });
+
+    document.getElementById('languageSelect').addEventListener('change',event=>{
+        uiLanguage=event.target.value;
+        localizeDisplay();
+    });
+    if(document.fonts)document.fonts.ready.then(()=>{for(const chart of [brewChart,poolChart,diagnosticChart])if(chart)chart.update();});
+    // Translate before simulation/chart initialization, even on offline devices.
+    localizeDisplay();
+    setTimeout(() => {
+        initSimulation();
+        resizeCanvas();
+    }, 100);
+</script>
+
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
